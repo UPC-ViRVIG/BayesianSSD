@@ -3,44 +3,41 @@
 
 #include <glm/glm.hpp>
 #include <array>
+#include "Vector.h"
 
-namespace BilinearInterpolation
+template<uint32_t Dim>
+struct MultivariateLinearInterpolation
 {
-    void eval(glm::vec2 np, std::array<float, 4>& outWeights)
+    static constexpr uint32_t NumControlPoints = 1 << Dim;
+    using vec = VStruct<Dim>::type;
+
+    static void eval(vec np, std::array<float, NumControlPoints>& outWeights)
     {
-        outWeights[0] = (1.0f - np.x) * (1.0f - np.y);
-        outWeights[1] = np.x * (1.0f - np.y);
-        outWeights[2] = (1.0f - np.x) * np.y;
-        outWeights[3] = np.x * np.y;
+        for(uint32_t i=0; i < NumControlPoints; i++)
+        {
+            outWeights[i] = 1.0f;
+            for(uint32_t j=0; j < Dim; j++)
+            {
+                outWeights[i] *= (i & (1 << j)) ? np[j] : (1.0f - np[j]);
+            }
+        }
     }
 
-    void evalGrad(glm::vec2 np, std::array<std::array<float, 4>, 2>& outWeights)
+    static void evalGrad(vec np, std::array<std::array<float, NumControlPoints>, Dim>& outWeights)
     {
-        // In X
-        outWeights[0][0] = -(1.0f - np.y);
-        outWeights[0][1] = (1.0f - np.y);
-        outWeights[0][2] = -np.y;
-        outWeights[0][3] = np.y;
-
-        // In Y
-        outWeights[1][0] = -(1.0f - np.x);
-        outWeights[1][1] = -np.x;
-        outWeights[1][2] = (1.0f - np.x);
-        outWeights[1][3] = np.x;
+        for(uint32_t d=0; d < Dim; d++)
+        {
+            for(uint32_t i=0; i < NumControlPoints; i++)
+            {
+                outWeights[d][i] = 1.0f;
+                for(uint32_t j=0; j < Dim; j++)
+                {
+                    if(d == j) outWeights[d][i] *= (i & (1 << j)) ? 1.0f : -1.0f;
+                    else outWeights[d][i] *= (i & (1 << j)) ? np[j] : (1.0f - np[j]);
+                }
+            }
+        }
     }
-}
-
-namespace TrilinarInterpolation
-{
-    void eval(glm::vec2 np, std::array<float, 4>& outWeights)
-    {
-        // TODO
-    }
-
-    void evalGrad(glm::vec2 np, std::array<std::array<float, 4>, 2>& outWeights)
-    {
-        // TODO
-    }
-}
+};
 
 #endif

@@ -32,11 +32,40 @@ if(NOT glm_lib_POPULATED)
     FetchContent_Populate(glm_lib)
     add_subdirectory(${glm_lib_SOURCE_DIR} ${glm_lib_BINARY_DIR})
 endif()
-set(SDFLIB_GLM_TARGET glm PARENT_SCOPE)
+
+# happly
+FetchContent_Declare(happly_lib
+	  GIT_REPOSITORY https://github.com/nmwsharp/happly.git
+	  GIT_TAG 8a606309daaa680eee495c8279feb0b704148f4a # 0.9.8
+	)
+
+FetchContent_GetProperties(happly_lib)
+if(NOT happly_lib_POPULATED)
+    FetchContent_Populate(happly_lib)
+    add_library(happly INTERFACE)
+    target_include_directories(happly INTERFACE ${happly_lib_SOURCE_DIR})
+endif()
+
+# cereal
+FetchContent_Declare(cereal_lib
+    GIT_REPOSITORY https://github.com/USCiLab/cereal.git
+    GIT_TAG ebef1e929807629befafbb2918ea1a08c7194554 # 1.3.2
+)
+
+FetchContent_GetProperties(cereal_lib)
+if(NOT cereal_lib_POPULATED)
+    FetchContent_Populate(cereal_lib)
+    set(BUILD_DOC OFF)
+    set(BUILD_SANDBOX  OFF)
+    set(BUILD_TESTS OFF)
+    set(CEREAL_INSTALL OFF)
+    set(SKIP_PERFORMANCE_COMPARISON ON)
+    add_subdirectory(${cereal_lib_SOURCE_DIR} ${cereal_lib_BINARY_DIR})
+endif()
 
 
 file(GLOB SOURCE_FILES ./src/*.cpp)
-add_executable(recon src/tools/main.cpp ${SOURCE_FILES})
+add_executable(recon src/tools/3D/main.cpp ${SOURCE_FILES})
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_include_directories(${PROJECT_NAME} PUBLIC include)
-target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm)
+target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm happly cereal::cereal)

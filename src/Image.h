@@ -1,11 +1,9 @@
 #ifndef _IMAGE_INCLUDE
 #define _IMAGE_INCLUDE
 
-
-#include <glm/glm.hpp>
 #include <vector>
 #include <string>
-
+#include <glm/glm.hpp>
 
 class Image
 {
@@ -30,7 +28,6 @@ public:
 private:
 	unsigned int w, h;
 	std::vector<glm::vec3> pixels;
-
 };
 
 
