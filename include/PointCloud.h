@@ -7,23 +7,21 @@
 #include <glm/glm.hpp>
 
 
-using namespace std;
-
-
+template<uint32_t Dim>
 class PointCloud
 {
 public:
-	bool readFromFile(const string &filename);
+	bool readFromFile(const std::string &filename);
 	
 	unsigned int size() const;
-	glm::vec2 &point(unsigned int index);
-	const glm::vec2 &point(unsigned int index) const;
-	glm::vec2 &normal(unsigned int index);
-	const glm::vec2 &normal(unsigned int index) const;
-	const vector<glm::vec2>& getPoints() const { return points; }
+	vec &point(unsigned int index);
+	const vec &point(unsigned int index) const;
+	vec &normal(unsigned int index);
+	const vec &normal(unsigned int index) const;
+	const std::vector<vec>& getPoints() const { return points; }
 
 private:
-	vector<glm::vec2> points, normals;
+	std::vector<vec> points, normals;
 
 };
 
