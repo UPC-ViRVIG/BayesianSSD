@@ -65,7 +65,8 @@ endif()
 
 
 file(GLOB SOURCE_FILES ./src/*.cpp)
-add_executable(recon src/tools/3D/main.cpp ${SOURCE_FILES})
+add_executable(recon src/tools/2D/main.cpp ${SOURCE_FILES})
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_include_directories(${PROJECT_NAME} PUBLIC include)
 target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm happly cereal::cereal)
+# target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm cereal::cereal)

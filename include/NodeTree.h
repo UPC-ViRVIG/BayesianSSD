@@ -6,9 +6,13 @@
 #include <vector>
 #include <array>
 #include <memory>
+#include <stack>
 #include <optional>
 #include "Vector.h"
 #include "PointCloud.h"
+
+template<uint32_t Dim>
+class LinearNodeTree;
 
 /*
     Tree of nodes subdiving a part of the space
@@ -21,15 +25,16 @@ public:
     using vec = VStruct<Dim>::type;
     static constexpr uint32_t NumNeighboursVert = 2 * Dim;
     static constexpr uint32_t NumAdjacentNodes = 1 << Dim;
+    static constexpr uint32_t NumVerticesPerNode = 1 << Dim;
 
     struct Node
     {
         vec minCoord;
         vec maxCoord;
         uint32_t depth;
-        std::array<uint32_t, NumNeighboursVert> controlPointsIdx;
+        std::array<uint32_t, NumVerticesPerNode> controlPointsIdx;
 
-        glm::vec2 transformToLocalCoord(vec point)
+        vec transformToLocalCoord(vec point)
         {
             return (point - minCoord) / (maxCoord - minCoord);
         }
@@ -50,11 +55,14 @@ public:
     const std::vector<vec>& getVertices() const { return verticesPos; };
     const std::vector<uint32_t>& getTJointVerticesIndex() const { return tJointVertices; };
     void getNode(vec point, std::optional<Node>& outNode) const;
-    uint32_t getAdjacentNodes(uint32_t vertId, std::array<NodeTree::Node, NumNeighboursVert>& outNodes) const;
-    glm::vec2 getMinOctreeCoord() const { return minCoord; }
-    glm::vec2 getMaxOctreeCoord() const { return maxCoord; }
+    uint32_t getAdjacentNodes(uint32_t vertId, std::array<NodeTree::Node, NumAdjacentNodes>& outNodes) const;
+    vec getMinCoord() const { return minCoord; }
+    vec getMaxCoord() const { return maxCoord; }
+    uint32_t getMaxDepth() const { return maxDepth; }
 
-private:
+    friend class LinearNodeTree<Dim>;
+
+    // TODO: move this struct to private
 	struct InternalNode
     {
         InternalNode() {}
@@ -68,7 +76,7 @@ private:
         static constexpr uint32_t CHILDREN_INDEX_MASK = ~(IS_LEAF_MASK);
 
         uint32_t childrenIndex;
-        std::array<uint32_t, NumNeighboursVert> controlPointsIdx;
+        std::array<uint32_t, NumVerticesPerNode> controlPointsIdx;
 
         inline bool isLeaf() const
         {
@@ -86,6 +94,111 @@ private:
                             ((isLeaf) ? IS_LEAF_MASK : 0);
         }
     };
+
+    struct const_iterator
+    {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = Node;
+        using pointer           = Node*;  // or also value_type*
+        using const_pointer     = const Node*;  // or also value_type*
+        using reference         = Node&;  // or also value_type&
+        using const_reference   = const Node&;  // or also value_type&
+        static constexpr uint32_t NumNeigbourNodes = 1 << Dim;
+
+        const_iterator(const NodeTree<Dim>& tree) : myTree(tree) {}
+        void setToBegin() 
+        {
+            nodes = std::stack<InternalNode>(); // Clear stack
+            Node node;
+            node.minCoord = myTree.minCoord;
+            node.maxCoord = myTree.maxCoord;
+            node.depth = 0;
+            nodes.push(InternalNode{0, node, 0}); // Insert root
+            while(!myTree.octreeData[nodes.top().nodeIdx].isLeaf())
+            {
+                // Get first child
+                const uint32_t startIdx = myTree.octreeData[nodes.top().nodeIdx].getChildrenIndex();
+                nodes.push(InternalNode { startIdx, 
+                                         getNodeChildren(nodes.top().node, 0),
+                                         0 });
+            }
+            nodes.top().node.controlPointsIdx = myTree.octreeData[nodes.top().nodeIdx].controlPointsIdx;
+        }
+
+        // TODO: make a more efficient end iterator
+        void setToEnd() 
+        {
+            nodes.push(InternalNode { std::numeric_limits<uint32_t>::max(), Node(), std::numeric_limits<uint32_t>::max() });
+        }
+        
+        const_reference operator*() const { return nodes.top().node; }
+        const_pointer operator->() const { return &nodes.top().node; }
+
+        const_iterator& operator++() 
+        {
+            nodes.pop();
+            while(!myTree.octreeData[nodes.top().nodeIdx].isLeaf())
+            {
+                while(!nodes.empty() && ++nodes.top().currentChildIdx >= NumNeigbourNodes) nodes.pop();
+                if(nodes.empty())
+                {
+                    nodes.push(InternalNode { std::numeric_limits<uint32_t>::max(), Node(), std::numeric_limits<uint32_t>::max() });
+                    return *this;
+                }
+
+                const uint32_t idx = myTree.octreeData[nodes.top().nodeIdx].getChildrenIndex() + nodes.top().currentChildIdx;
+                nodes.push(InternalNode { idx, 
+                                         getNodeChildren(nodes.top().node, nodes.top().currentChildIdx),
+                                         std::numeric_limits<uint32_t>::max() });
+            }
+            nodes.top().node.controlPointsIdx = myTree.octreeData[nodes.top().nodeIdx].controlPointsIdx;
+            return *this;
+        }
+
+        const_iterator operator++(int) { const_iterator tmp = *this; ++(*this); return tmp; }
+
+        friend bool operator==(const const_iterator& a, const const_iterator& b) { return a.nodes.top().nodeIdx == b.nodes.top().nodeIdx; }
+        friend bool operator!=(const const_iterator& a, const const_iterator& b) { return a.nodes.top().nodeIdx != b.nodes.top().nodeIdx; }
+    private:
+        const NodeTree<Dim>& myTree;
+        struct InternalNode
+        {
+            uint32_t nodeIdx;
+            Node node;
+            uint32_t currentChildIdx;
+        };
+        std::stack<InternalNode> nodes;
+
+        inline Node getNodeChildren(const Node& node, uint32_t chIdx)
+        {
+            Node res;
+            res.depth = node.depth + 1;
+            vec center = 0.5f * (node.maxCoord + node.minCoord);
+            for(uint32_t i=0; i < Dim; i++)
+            {
+                res.minCoord[i] = (chIdx & (1 << i)) ? center[i] : node.minCoord[i];
+                res.maxCoord[i] = (chIdx & (1 << i)) ? node.maxCoord[i] : center[i];
+            }
+            return res;
+        }
+    };
+
+    const_iterator begin() const 
+    { 
+        const_iterator it(*this);
+        it.setToBegin();
+        return std::move(it);
+    }
+
+    const_iterator end() const 
+    { 
+        const_iterator it(*this);
+        it.setToEnd();
+        return std::move(it);
+    }
+private:
 
     // Octree dimensions
     vec minCoord;
@@ -164,9 +277,10 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
     createNode = [&](NodeInfo& nodeInfo, const Points& nodePoints) -> void
     {
         if(nodeInfo.depth < maxDepth && nodePoints.size() > 0) // Create childrens
+        // if(nodeInfo.depth < maxDepth) // Create childrens
         {
             const uint32_t chIndex = octreeData.size();
-            octreeData.resize(octreeData.size() + 4);
+            octreeData.resize(octreeData.size() + numNodes);
             octreeData[nodeInfo.nodeIndex].setValues(false, chIndex);
             std::array<Points, numNodes> points;
             points.fill(Points());
@@ -194,7 +308,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
                 // points[nodeIdx].push_back(p);                        
             }
 
-            for(uint32_t i=0; i < 4; i++)
+            for(uint32_t i=0; i < numNodes; i++)
             {
                 NodeInfo nInfo;
                 nInfo.nodeIndex = chIndex + i;
@@ -213,9 +327,9 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
             InternalNode& node = octreeData[nodeInfo.nodeIndex];
             node.setValues(true);
             // Get control points
-            for(uint32_t i=0; i < 4; i++)
+            for(uint32_t i=0; i < NumVerticesPerNode; i++)
             {
-                glm::vec2 cp;
+                vec cp;
                 for(uint32_t j=0; j < Dim; j++)
                     cp[j] = (i & (1 << j)) ? nodeInfo.maxCoord[j] : nodeInfo.minCoord[j];
 
@@ -271,7 +385,7 @@ void NodeTree<Dim>::getNode(vec point, std::optional<Node>& outNode) const
     uint32_t cIndex = 0;
     while(!octreeData[cIndex].isLeaf())
     {
-        glm::vec2 center = 0.5f * (outNode->maxCoord + outNode->minCoord);
+        vec center = 0.5f * (outNode->maxCoord + outNode->minCoord);
         uint32_t chIdx = 0;
         for(uint32_t i=0; i < Dim; i++)
         {
@@ -289,13 +403,13 @@ void NodeTree<Dim>::getNode(vec point, std::optional<Node>& outNode) const
 }
 
 template<uint32_t Dim>
-uint32_t NodeTree<Dim>::getAdjacentNodes(uint32_t vertId, std::array<NodeTree::Node, NumNeighboursVert>& outNodes) const
+uint32_t NodeTree<Dim>::getAdjacentNodes(uint32_t vertId, std::array<NodeTree::Node, NumAdjacentNodes>& outNodes) const
 {
     const float octreeLength = static_cast<float>(1 << maxDepth);
-    const glm::vec2 nodeSize = (maxCoord - minCoord) / octreeLength;
+    const vec nodeSize = (maxCoord - minCoord) / octreeLength;
 
-    const glm::vec2 coord = getVertices()[vertId];
-    constexpr uint32_t numNodes = 1 << Dim;
+    const vec coord = getVertices()[vertId];
+    constexpr uint32_t numNodes = NumAdjacentNodes;
     std::optional<Node> node;
     uint32_t index = 0;
     for(uint32_t i=0; i < numNodes; i++)

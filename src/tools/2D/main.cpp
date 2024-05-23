@@ -3,7 +3,8 @@
 #include "EigenSquareSolver.h"
 #include "Image.h"
 
-void drawScalarField(Image& image, LinearNodeTree<2>& scalarField, 
+template<typename SF>
+void drawScalarField(Image& image, SF& scalarField, 
 					 std::optional<std::reference_wrapper<PointCloud<2>>> cloud = std::optional<std::reference_wrapper<PointCloud<2>>>(), 
 					 bool drawGrid = true)
 {
@@ -66,6 +67,70 @@ void drawScalarField(Image& image, LinearNodeTree<2>& scalarField,
 			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 4, glm::vec3(0.35f, 0.35f, 0.35f));
 		}
 	}
+
+	// image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 4, glm::vec3(1.0f, 0.0f, 0.0f));
+}
+
+
+template<typename SF>
+void drawGradientMaginitudeImage(Image& image, SF& scalarField)
+{
+	NodeTree<2>& qtree = scalarField.getNodeTree();
+
+	const std::array<glm::vec3, 2> palette = {
+		glm::vec3(1.0f, 1.0f, 1.0f),
+		glm::vec3(1.0f, 0.0f, 0.0f)
+	};
+
+	float max=0.0f;
+	float mean=0.0f;
+	for(uint32_t i=0; i < image.width(); i++)
+	{
+		for(uint32_t j=0; j < image.height(); j++)
+		{
+			glm::vec2 pos = glm::vec2((static_cast<float>(i)+0.5f) / static_cast<float>(image.width()), 
+									  (static_cast<float>(j)+0.5f) / static_cast<float>(image.height()));
+
+			const glm::vec2 pval = scalarField.evalGrad(pos);
+			const float len = glm::length(pval);
+			max = glm::max(max, glm::abs(len-1.0f));
+			mean += len;
+		}
+	}
+
+	mean = mean / static_cast<float>(image.width() * image.height());
+	std::cout << "Grad magnitude mean " << mean << std::endl;
+	
+	const float maxValue = scalarField.getMaxAbsValue();
+	for(uint32_t i=0; i < image.width(); i++)
+	{
+		for(uint32_t j=0; j < image.height(); j++)
+		{
+			glm::vec2 pos = glm::vec2((static_cast<float>(i)+0.5f) / static_cast<float>(image.width()), 
+									  (static_cast<float>(j)+0.5f) / static_cast<float>(image.height()));
+
+			// Field color
+			const glm::vec2 pval = scalarField.evalGrad(pos);
+			const float len = glm::abs(glm::length(pval)-1.0f);
+			float val = glm::clamp(len / max, 0.0f, 0.999999f);
+			val = static_cast<float>(palette.size() - 1) * val;
+			uint32_t cid = glm::floor(val);
+			glm::vec3 bgColor = glm::mix(palette[cid], palette[cid+1], glm::fract(val));
+
+			float sval = scalarField.eval(pos);
+			float aval = glm::abs(sval / maxValue);
+			// Isosurface line
+			float surfaceColorWeight = glm::clamp(1.0 - glm::pow(aval/0.009f, 12), 0.0, 1.0);
+			surfaceColorWeight = 0;
+
+			// Isolines
+			float valToLevel = 0.5f - glm::abs(glm::fract(aval / 0.03f) - 0.5);
+			float linesColorWeight = glm::clamp(1.0 - glm::pow(valToLevel * 0.03f/0.0015f, 12), 0.0, 1.0);
+			linesColorWeight = 0;
+
+			image(i, j) = glm::mix(bgColor, glm::vec3(0.0f), glm::max(surfaceColorWeight, linesColorWeight));
+		}
+	}
 }
 
 int main(int argc, char *argv[])
@@ -89,22 +154,30 @@ int main(int argc, char *argv[])
 		pos += glm::vec2(0.01f);
 	}
 
-	const uint32_t maxDepth = 6;
+	// for(auto& v : cloud.getPoints())
+	// {
+	// 	v = 0.2f * (v - NodeTree<2>::vec(0.5f)) + NodeTree<2>::vec(0.5f);
+	// }
+
+	const uint32_t maxDepth = 7;
 	NodeTree<2>::Config quadConfig = {
 		.minCoord = NodeTree<2>::vec(0.0f),
 		.maxCoord = NodeTree<2>::vec(1.0f),
-		.pointFilterMaxDistance = 1.0f / static_cast<float>(1 << maxDepth) ,
-		// .pointFilterMaxDistance = 0.0f,
+		.pointFilterMaxDistance = 1.33f / static_cast<float>(1 << maxDepth),
+		//.pointFilterMaxDistance = 0.0f,
 		.constraintNeighbourNodes = false,
 		.maxDepth = maxDepth
 	};
 
 	SmoothSurfaceReconstruction::Config<2> config = {
 		.nodeTreeConfig = quadConfig,
-		.posWeight = 1.0f, 
-        .gradientWeight = 1.0f,
+		.posWeight = 100.0f, 
+        .gradientWeight = 100.0f,
         .smoothWeight = 1.0f
 	};
+
+	// std::unique_ptr<CubicNodeTree<2>> scalarField = 
+	// 	SmoothSurfaceReconstruction::compute2DCubicNodeTree<2>(cloud, config);
 
 	std::unique_ptr<LinearNodeTree<2>> scalarField = 
 		SmoothSurfaceReconstruction::computeLinearNodeTree<2, EigenSquareSolver>(cloud, config);
@@ -113,6 +186,11 @@ int main(int argc, char *argv[])
 	image.init(1024, 1024);
 	drawScalarField(image, *scalarField, cloud, true);
 	image.savePNG("quadtree.png"); 
+
+	// Image imageG;
+	// imageG.init(1024, 1024);
+	// drawGradientMaginitudeImage(imageG, *scalarField);
+	// imageG.savePNG("quadtreeGrad.png"); 
 
 	return 0;
 }

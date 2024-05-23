@@ -58,6 +58,7 @@ public:
 
 private:
     std::vector<Eigen::Triplet<double>> matrixTriplets;
+    std::vector<Eigen::Triplet<double>> subMatrixTriplets;
     std::vector<double> constantTerms;
     uint32_t nUnknowns;
     uint32_t eqIdx;
