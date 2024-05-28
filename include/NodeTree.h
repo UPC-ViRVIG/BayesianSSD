@@ -200,6 +200,15 @@ public:
     }
 private:
 
+    // Used for internal node communication
+    struct NodeInfo
+    {
+        uint32_t nodeIndex;
+        vec minCoord;
+        vec maxCoord;
+        uint32_t depth;
+    };
+
     // Octree dimensions
     vec minCoord;
     vec maxCoord;
@@ -209,20 +218,82 @@ private:
     std::vector<InternalNode> octreeData;
     std::vector<vec> verticesPos;
     std::vector<uint32_t> tJointVertices;
+    
+    // Returns if it has at two depths more
+    bool getNeighbourNode(vec point, std::optional<NodeInfo>& outNode, uint32_t maxDepth, uint32_t childMask, uint32_t childDefaultValue) const;
 };
 
+template<uint32_t Dim>
+bool NodeTree<Dim>::getNeighbourNode(vec point, std::optional<NodeInfo>& outNode, uint32_t maxDepth, uint32_t childMask, uint32_t childDefaultValue) const
+{
+    if(glm::any(glm::lessThan(point, minCoord)) || 
+	   glm::any(glm::greaterThan(point, maxCoord)))
+	{
+		outNode = std::optional<NodeInfo>();
+        return false;
+	}
+
+    outNode = std::optional<NodeInfo>(NodeInfo());
+    outNode->nodeIndex = 0;
+    outNode->minCoord = minCoord;
+    outNode->maxCoord = maxCoord;
+    outNode->depth = 0;
+
+    while(!octreeData[outNode->nodeIndex].isLeaf() && outNode->depth < maxDepth)
+    {
+        vec center = 0.5f * (outNode->maxCoord + outNode->minCoord);
+        uint32_t chIdx = 0;
+        for(uint32_t i=0; i < Dim; i++)
+        {
+            chIdx += ((point[i] < center[i]) ? 0 : (1 << i));
+            outNode->minCoord[i] = (point[i] < center[i]) ? outNode->minCoord[i] : center[i];
+            outNode->maxCoord[i] = (point[i] < center[i]) ? center[i] : outNode->maxCoord[i];
+        }
+
+        outNode->nodeIndex = octreeData[outNode->nodeIndex].getChildrenIndex() + chIdx;
+
+        outNode->depth++;
+    }
+
+    if(outNode->depth < maxDepth) return false;
+
+    const uint32_t nodeIndex = outNode->nodeIndex;
+    outNode = std::nullopt;
+    if(!childMask || octreeData[nodeIndex].isLeaf()) return false;
+
+    // Check if childrens are leaves
+    uint32_t numBits = 0;
+    std::array<uint32_t, Dim> childrenBits;
+    for(uint32_t i=0; i < Dim; i++)
+    {
+        if(childMask & (1 << i))
+        {
+            childrenBits[numBits++] = i;
+        }
+    }
+
+    const uint32_t numChildren = 1 << numBits;
+    for(uint32_t i=0; i < numChildren; i++)
+    {
+        uint32_t childIdx = childDefaultValue & (~childMask);
+        for(uint32_t j=0; j < numBits; j++)
+        {
+            childIdx = childIdx | (((i >> j) & 0b01) << childrenBits[j]);
+        }
+
+        if(!octreeData[octreeData[nodeIndex].getChildrenIndex() + childIdx].isLeaf())
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 template<uint32_t Dim>
 void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
 {
     using Points = std::vector<vec>;
-    struct NodeInfo
-    {
-        uint32_t nodeIndex;
-        vec minCoord;
-        vec maxCoord;
-        uint32_t depth;
-    };
 
     struct ControlPoint
     {
@@ -271,6 +342,8 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
         }
     };
 
+    std::vector<NodeInfo> nodesToCheck; // Useed for checking if the nodes need more subdivision
+
     constexpr uint32_t numNodes = 1 << Dim;
     const float filterMaxDistanceSq =  config.pointFilterMaxDistance *  config.pointFilterMaxDistance;
     std::function<void(NodeInfo&, const Points&)> createNode;
@@ -302,6 +375,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
                         points[i].push_back(p);   
                 }
 
+                // Simple version
                 // uint32_t nodeIdx = 0;
                 // for(uint32_t i=0; i < Dim; i++)
                 //     nodeIdx += ((p[i] < center[i]) ? 0 : (1 << i));
@@ -335,12 +409,102 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
 
                 node.controlPointsIdx[i] = getCPid(cp);
             }
+
+            if(config.constraintNeighbourNodes && nodeInfo.depth < maxDepth-1)
+            {
+                nodesToCheck.push_back(nodeInfo);
+            }
         }
     };
 
     createNode(root, cloud.getPoints());
 
-    // Recolect Tjoints
+    auto needSubdivision = [&](const NodeInfo& node, std::array<NodeInfo, 4>& outNodes, uint32_t& numNeighbours)
+    {
+        const vec center = 0.5f * (node.minCoord + node.maxCoord);
+        const vec size = node.maxCoord - node.minCoord;
+        numNeighbours = 0;
+        bool subdivide = false;
+        const uint32_t workBits = (1 << Dim) - 1;
+        // const uint32_t numThreeStateOptions = (Dim == 1) ? 0 : 1 << (Dim - 2);
+        // for(uint32_t i=0; i < Dim; i++)
+        // {
+        //     for(uint32_t j=0; j < numThreeStateOptions; j++)
+        //     {
+        //         vec newPos = center;
+
+
+        //     }
+        // }
+        for(float sign : {-1.0f, 1.0f})
+        {
+            for(uint32_t i=0; i < Dim; i++)
+            {
+                // Search all neighbours in that side
+                const uint32_t mask = (~(1 << i)) & workBits;
+                const uint32_t defaultValue = (sign > 0.0f ? 1 : 0) << i;
+                vec newPos = center;
+                newPos[i] += sign * size[i];
+                std::optional<NodeInfo> nn;
+                subdivide = subdivide || getNeighbourNode(newPos, nn, node.depth, mask, defaultValue);
+                if(nn) outNodes[numNeighbours++] = *nn;
+            }
+        }
+
+        return subdivide;
+    };
+
+    // Avoid big depth difference between neigbour nodes
+    if(config.constraintNeighbourNodes)
+    {
+        uint32_t numNeighbours = 0;
+        std::array<NodeInfo, 4> neighbourNodes;
+        while(nodesToCheck.size() > 0)
+        {
+            NodeInfo node = nodesToCheck.back();
+            nodesToCheck.pop_back();
+
+            if(needSubdivision(node, neighbourNodes, numNeighbours))
+            {
+                for(uint32_t i=0; i < numNeighbours; i++)
+                {
+                    nodesToCheck.push_back(neighbourNodes[i]);
+                }
+
+                // Create childrens
+                const vec center = 0.5f * (node.minCoord + node.maxCoord);
+                const uint32_t chIndex = octreeData.size();
+                octreeData.resize(octreeData.size() + numNodes);
+                octreeData[node.nodeIndex].setValues(false, chIndex);
+                for(uint32_t i=0; i < numNodes; i++)
+                {
+                    NodeInfo nInfo;
+                    nInfo.nodeIndex = chIndex + i;
+                    nInfo.depth = node.depth + 1;
+                    for(uint32_t j=0; j < Dim; j++)
+                    {
+                        nInfo.minCoord[j] = (i & (1 << j)) ? center[j] : node.minCoord[j];
+                        nInfo.maxCoord[j] = (i & (1 << j)) ? node.maxCoord[j] : center[j];
+                    }
+
+                    InternalNode& node = octreeData[nInfo.nodeIndex];
+                    node.setValues(true);
+
+                    for(uint32_t i=0; i < NumVerticesPerNode; i++)
+                    {
+                        vec cp;
+                        for(uint32_t j=0; j < Dim; j++)
+                            cp[j] = (i & (1 << j)) ? nInfo.maxCoord[j] : nInfo.minCoord[j];
+
+                        node.controlPointsIdx[i] = getCPid(cp);
+                    }
+                    nodesToCheck.push_back(nInfo);
+                }
+            }
+        }
+    }
+
+    // Recollect T-joints
     tJointVertices.clear();
     for(uint32_t i=0; i < cpInfo.size(); i++)
     {

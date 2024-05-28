@@ -159,13 +159,13 @@ int main(int argc, char *argv[])
 	// 	v = 0.2f * (v - NodeTree<2>::vec(0.5f)) + NodeTree<2>::vec(0.5f);
 	// }
 
-	const uint32_t maxDepth = 7;
+	const uint32_t maxDepth = 6;
 	NodeTree<2>::Config quadConfig = {
 		.minCoord = NodeTree<2>::vec(0.0f),
 		.maxCoord = NodeTree<2>::vec(1.0f),
-		.pointFilterMaxDistance = 1.33f / static_cast<float>(1 << maxDepth),
+		.pointFilterMaxDistance = 0.0f / static_cast<float>(1 << maxDepth),
 		//.pointFilterMaxDistance = 0.0f,
-		.constraintNeighbourNodes = false,
+		.constraintNeighbourNodes = true,
 		.maxDepth = maxDepth
 	};
 
