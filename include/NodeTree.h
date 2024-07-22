@@ -490,13 +490,14 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
                     InternalNode& node = octreeData[nInfo.nodeIndex];
                     node.setValues(true);
 
-                    for(uint32_t i=0; i < NumVerticesPerNode; i++)
+                    for(uint32_t j=0; j < NumVerticesPerNode; j++)
                     {
+                        if(i == j) continue;
                         vec cp;
-                        for(uint32_t j=0; j < Dim; j++)
-                            cp[j] = (i & (1 << j)) ? nInfo.maxCoord[j] : nInfo.minCoord[j];
+                        for(uint32_t k=0; k < Dim; k++)
+                            cp[k] = (j & (1 << k)) ? nInfo.maxCoord[k] : nInfo.minCoord[k];
 
-                        node.controlPointsIdx[i] = getCPid(cp);
+                        node.controlPointsIdx[j] = getCPid(cp);
                     }
                     nodesToCheck.push_back(nInfo);
                 }
