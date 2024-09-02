@@ -8,6 +8,7 @@
 #include <memory>
 #include <stack>
 #include <optional>
+#include <cstdlib>
 #include "Vector.h"
 #include "PointCloud.h"
 
@@ -318,7 +319,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
     const float octreeLength = static_cast<float>(1 << maxDepth);
     const vec nodeSize = (root.maxCoord - root.minCoord) / octreeLength;
     const vec octreeInvSize = 1.0f / (root.maxCoord - root.minCoord);
-    auto getCPid = [&](vec point) -> uint32_t
+    auto getCPid = [&](vec point, bool increaseCounter=true) -> uint32_t
     {
         vec norm = (point - root.minCoord) * octreeInvSize;
         uint32_t idx = 0;
@@ -331,13 +332,13 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
         if(it == idxToCPid.end())
         {
             idxToCPid[idx] = numVertices;
-            cpInfo.push_back(ControlPoint {point, 1});
+            cpInfo.push_back(ControlPoint {point, increaseCounter ? 1u : 0u});
             verticesPos.push_back(point);
             return numVertices++;
         }
         else
         {
-            cpInfo[it->second].numCorners++;
+            if(increaseCounter) cpInfo[it->second].numCorners++;
             return it->second;
         }
     };
@@ -351,6 +352,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
     {
         if(nodeInfo.depth < maxDepth && nodePoints.size() > 0) // Create childrens
         // if(nodeInfo.depth < maxDepth) // Create childrens
+        // if (nodeInfo.depth < maxDepth && rand() % (2 * maxDepth) > nodeInfo.depth || nodeInfo.depth < 2)
         {
             const uint32_t chIndex = octreeData.size();
             octreeData.resize(octreeData.size() + numNodes);
@@ -442,7 +444,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
             {
                 // Search all neighbours in that side
                 const uint32_t mask = (~(1 << i)) & workBits;
-                const uint32_t defaultValue = (sign > 0.0f ? 1 : 0) << i;
+                const uint32_t defaultValue = (sign > 0.0f ? 0 : 1) << i;
                 vec newPos = center;
                 newPos[i] += sign * size[i];
                 std::optional<NodeInfo> nn;
@@ -464,8 +466,12 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
             NodeInfo node = nodesToCheck.back();
             nodesToCheck.pop_back();
 
+            // Check if the node is still a leaf node
+            if(!octreeData[node.nodeIndex].isLeaf()) continue;
+
             if(needSubdivision(node, neighbourNodes, numNeighbours))
             {
+                needSubdivision(node, neighbourNodes, numNeighbours);
                 for(uint32_t i=0; i < numNeighbours; i++)
                 {
                     nodesToCheck.push_back(neighbourNodes[i]);
@@ -492,12 +498,11 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
 
                     for(uint32_t j=0; j < NumVerticesPerNode; j++)
                     {
-                        if(i == j) continue;
                         vec cp;
                         for(uint32_t k=0; k < Dim; k++)
                             cp[k] = (j & (1 << k)) ? nInfo.maxCoord[k] : nInfo.minCoord[k];
 
-                        node.controlPointsIdx[j] = getCPid(cp);
+                        node.controlPointsIdx[j] = getCPid(cp, i != j);
                     }
                     nodesToCheck.push_back(nInfo);
                 }
