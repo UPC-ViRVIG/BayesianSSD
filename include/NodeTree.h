@@ -448,7 +448,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
                 vec newPos = center;
                 newPos[i] += sign * size[i];
                 std::optional<NodeInfo> nn;
-                subdivide = subdivide || getNeighbourNode(newPos, nn, node.depth, mask, defaultValue);
+                subdivide = getNeighbourNode(newPos, nn, node.depth, mask, defaultValue) || subdivide;
                 if(nn) outNodes[numNeighbours++] = *nn;
             }
         }
