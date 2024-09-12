@@ -446,10 +446,10 @@ struct BicubicInterpolation
 
     static float integrateLaplacian(glm::vec2 nodeSize, std::array<std::array<float, 4>, 4>& values)
     {
-        auto pow = [](float val, uint32_t n)
+        auto pow = [](double val, uint32_t n) -> double
         {
-            float res = 1.0f;
-            for(uint32_t i=0; i < n; i++) res *= val;
+            double res = val;
+            for(uint32_t i=1; i < n; i++) res *= val;
             return res;
         };
 

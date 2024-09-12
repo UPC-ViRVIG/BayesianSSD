@@ -1,5 +1,5 @@
 #include <cmath>
-#include "Image.h"
+#include "MyImage.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 

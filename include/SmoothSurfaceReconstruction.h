@@ -8,28 +8,45 @@
 #include "InterpolationMethod.h"
 #include "EigenSparseMatrix.h"
 #include "EigenSolver.h"
+#include <Eigen/Eigenvalues>
+
+#include <fstream>
+template <typename T>
+void write_array_to_file(const std::vector<T>& arr, const std::string& filename) {
+  std::ofstream file(filename, std::ios::binary);
+  if (!file.is_open()) {
+    throw std::runtime_error("Failed to open file for writing.");
+  }
+
+  // Write the size of the array as the first element
+  size_t size = arr.size();
+  file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+
+  // Write each element of the array
+  for (const T& element : arr) {
+    file.write(reinterpret_cast<const char*>(&element), sizeof(element));
+  }
+
+  file.close();
+}
 
 namespace SmoothSurfaceReconstruction
 {
     template<uint32_t Dim>
     struct Config
     {
-        NodeTree<Dim>::Config nodeTreeConfig;
         float posWeight;
         float gradientWeight;
         float smoothWeight;
     };
 
     template<uint32_t Dim, typename Solver>
-    std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(const PointCloud<Dim>& cloud, Config<Dim> config)
+    std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config)
     {
         using NodeTreeConfig = NodeTree<Dim>::Config;
         using Inter = MultivariateLinearInterpolation<Dim>;
         using Node = NodeTree<Dim>::Node;
         using vec = ScalarField<Dim>::vec;
-
-        NodeTree<Dim> quad;
-        quad.compute(cloud, config.nodeTreeConfig);
 
         // Get constraints
         struct ConstrainedUnknown
@@ -136,7 +153,7 @@ namespace SmoothSurfaceReconstruction
         }
 
         // Generate Node equations
-        const unsigned int numNodesAtMaxDepth = 1 << config.nodeTreeConfig.maxDepth;
+        const unsigned int numNodesAtMaxDepth = 1 << quad.getMaxDepth();
         const vec nodeSize = (quad.getMaxCoord() - quad.getMinCoord()) / static_cast<float>(numNodesAtMaxDepth);
         for(uint32_t i = 0; i < quad.getNumVertices(); i++)
         {
@@ -168,11 +185,11 @@ namespace SmoothSurfaceReconstruction
 					quad.getNode(coord, node);
 					std::array<float, Inter::NumControlPoints> weights;
 					Inter::eval(node->transformToLocalCoord(coord), weights);
-					for(uint32_t i=0; i < Inter::NumControlPoints; i++)
+					for(uint32_t j=0; j < Inter::NumControlPoints; j++)
 					{
-						if(glm::abs(weights[i]) > 1e-8)
+						if(glm::abs(weights[j]) > 1e-8)
 						{
-							setUnkownValue(node->controlPointsIdx[i], config.smoothWeight * weights[i]);
+							setUnkownValue(node->controlPointsIdx[j], config.smoothWeight * weights[j]);
 						}
 					}
 				}
@@ -215,15 +232,14 @@ namespace SmoothSurfaceReconstruction
     }
 
     template<uint32_t Dim>
-    std::unique_ptr<CubicNodeTree<Dim>> compute2DCubicNodeTree(const PointCloud<Dim>& cloud, Config<Dim> config)
+    std::unique_ptr<CubicNodeTree<Dim>> compute2DCubicNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
+                                                               std::optional<std::reference_wrapper<std::vector<float>>> outNodeTreeVertexEnergyValues = std::optional<std::reference_wrapper<std::vector<float>>>(),
+                                                               std::optional<std::reference_wrapper<std::vector<float>>> outEigenValues = std::optional<std::reference_wrapper<std::vector<float>>>())
     {
         using NodeTreeConfig = NodeTree<Dim>::Config;
         using Inter = BicubicInterpolation;
         using Node = NodeTree<Dim>::Node;
         using vec = ScalarField<Dim>::vec;
-
-        NodeTree<Dim> quad;
-        quad.compute(cloud, config.nodeTreeConfig);
 
         // Get constraints
         struct ConstrainedUnknown
@@ -342,58 +358,6 @@ namespace SmoothSurfaceReconstruction
         }
 
         // Generate Node equations
-        // const unsigned int numNodesAtMaxDepth = 1 << config.nodeTreeConfig.maxDepth;
-        // const vec nodeSize = 0.5f * (quad.getMaxCoord() - quad.getMinCoord()) / static_cast<float>(numNodesAtMaxDepth);
-        // for(uint32_t i = 0; i < quad.getNumVertices(); i++)
-        // {
-        //     if(vertIdToUnknownVertId[i] == std::numeric_limits<uint32_t>::max())
-        //         continue;
-
-        //     uint32_t numValidSides = 0;
-        //     for(uint32_t d=0; d < Dim; d++)
-        //     {
-        //         vec side;
-        //         for(uint32_t j=0; j < Dim; j++)
-        //             side[j] = (d == j) ? 1.0f : 0.0f;
-                
-        //         std::optional<Node> node;
-		// 		bool valid = true;
-		// 		for(float sign : {-1.0f, 1.0f})
-		// 		{
-        //             const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
-		// 			quad.getNode(coord, node);
-		// 			if(!node) { valid = false; break; }
-		// 		}
-
-		// 		if(!valid) continue;
-		// 		numValidSides++;
-
-		// 		for(float sign : {-1.0f, 1.0f})
-		// 		{
-        //             const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
-		// 			quad.getNode(coord, node);
-		// 			std::array<std::array<float, Inter::NumBasis>, Inter::NumControlPoints> weights;
-		// 			Inter::eval(node->transformToLocalCoord(coord), weights);
-		// 			for(uint32_t i=0; i < Inter::NumControlPoints; i++)
-		// 			{
-        //                 for(float& v : weights[i]) v *= config.smoothWeight;
-        //                 setUnkownValue(node->controlPointsIdx[i], weights[i]);
-		// 			}
-		// 		}
-		// 	}
-
-		// 	if(numValidSides > 0) 
-        //     {
-        //         std::array<float, Inter::NumBasis> weights;
-        //         weights.fill(0.0f);
-        //         weights[0] = -config.smoothWeight * 2.0f * static_cast<float>(numValidSides);
-        //         setUnkownValue(i, weights);
-        //         solver.addConstantTerm(0.0f);
-        //         solver.endEquation();
-        //     }
-        // }
-
-        // Generate Node equations
         EigenSparseMatrix nodesMatrix(numUnknows, numUnknows);
         std::function<void(uint32_t, uint32_t, const std::array<float, Inter::NumBasis>&)> setUnkownTerm;
         setUnkownTerm = [&](uint32_t eqIdx, uint32_t vertId, const std::array<float, Inter::NumBasis>& value)
@@ -456,11 +420,114 @@ namespace SmoothSurfaceReconstruction
         Eigen::SparseMatrix<double> pM = pointsMatrix.getMatrix();
         Eigen::VectorXd pb = pointsVector.getVector();
         Eigen::SparseMatrix<double> nM = nodesMatrix.getMatrix();
-        auto A = pM.transpose() * pM + nM;
-        auto b = pM.transpose() * pb;
+        auto A = 2.0f * pM.transpose() * pM + nM;
+        auto b = 2.0f * pM.transpose() * pb;
+        for (double& v : unknownsValues) v = 0.0;
         auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
-        EigenSolver::BiCGSTAB::solve(A, b, x);
+        std::cout << (A*x - b).squaredNorm() << std::endl;
+        // std::vector<float> solverIterValues;
+        // std::vector<float> solverIterSteps;
+        // EigenSolver::GD::solve(A, b, x, &solverIterValues, &solverIterSteps);
+        // write_array_to_file(solverIterValues, "solverIterValues.bin");
+        // write_array_to_file(solverIterSteps, "solverIterSteps.bin");
 
+        EigenSolver::BiCGSTAB::solve(A, b, x);
+        // EigenSolver::CG::solve(A, b, x);
+
+        std::cout << "Final error: " << (A*x - b).squaredNorm() << std::endl;
+
+
+        // if(outNodeTreeVertexEnergyValues || outEigenValues)
+        if(false)
+        {
+            Eigen::SelfAdjointEigenSolver<Eigen::SparseMatrix<double>> eigenSolver;
+            eigenSolver.compute(A, Eigen::DecompositionOptions::ComputeEigenvectors);
+            Eigen::VectorXd eigenValues = eigenSolver.eigenvalues();
+            auto eigenVectors = eigenSolver.eigenvectors();
+
+            if(outEigenValues)
+            {
+                outEigenValues->get().resize(eigenValues.size());
+                for(uint32_t i=0; i < eigenValues.size(); i++) // Copy array
+                {
+                    outEigenValues->get()[i] = eigenValues[i];
+                }
+            }
+
+            // std::vector<uint32_t> eigenIndices(eigenValues.size());
+            // for(uint32_t i=0; i < eigenIndices.size(); i++)
+            // {
+            //     eigenIndices[i] = i;
+            // }
+
+            // std::sort(eigenIndices.begin(), eigenIndices.end(), [&](const uint32_t& a, const uint32_t& b) -> bool {
+            //     return eigenValues[a] > eigenValues[b];
+            // });
+            
+            // std::vector<float> unknownsEnergy(numUnknows, 0.0f);
+
+            // for(uint32_t i=0; i < eigenValues.size(); i++)
+            // {
+            //     const uint32_t eIdx = eigenIndices[i];
+            //     for(uint32_t ei=0; ei < numUnknows; ei++)
+            //     {
+            //         unknownsEnergy[ei] += glm::abs(eigenVectors.col(eIdx)(ei)) * glm::abs(eigenValues[eIdx]);
+            //     }
+            // }
+            
+            // std::vector<float>& treeVertexEnergy = outNodeTreeVertexEnergyValues.value();
+            // treeVertexEnergy = std::vector<float>(Inter::NumBasis * quad.getNumVertices(), 0.0f);
+            // for(uint32_t i = 0; i < quad.getNumVertices(); i++)
+            // {
+            //     if(vertIdToUnknownVertId[i] == std::numeric_limits<uint32_t>::max()) continue;
+            //     for(uint32_t j = 0; j < Inter::NumBasis; j++)
+            //     {
+            //         treeVertexEnergy[Inter::NumBasis * i + j] = unknownsEnergy[Inter::NumBasis * vertIdToUnknownVertId[i] + j];
+            //     }
+            // }
+
+            // Invert eigen values
+            
+            Eigen::MatrixXd same = eigenVectors * eigenVectors.transpose();
+            std::cout << "Identity: " << (same - Eigen::MatrixXd::Identity(numUnknows, numUnknows)).squaredNorm() << std::endl;
+
+            Eigen::VectorXd zb = eigenVectors.transpose() * b;
+            std::cout << "Norm Z: " << (eigenVectors * zb - b).squaredNorm() << std::endl;
+            uint32_t notInverted = 0;
+            for(uint32_t i=0; i < eigenValues.rows(); i++)
+            {
+                if(glm::abs(eigenValues[i]) < 1e20)
+                {
+                    zb(i) = zb(i) / eigenValues(i);
+                }
+                else
+                {
+                    eigenValues(i) = 0.0;
+                    notInverted++;
+                }
+            }
+
+            std::cout << "not inverted " << notInverted << std::endl;
+            x = eigenVectors * zb;
+            std::cout << "Final error: " << (A*x - b).squaredNorm() << std::endl;
+
+
+        // double minEigenValue = glm::abs(eigenValues[0]); 
+            // double maxEigenValue = glm::abs(eigenValues[0]); 
+            // for(uint32_t i=1; i < eigenValues.rows(); i++)
+            // {
+            //     minEigenValue = glm::min(minEigenValue, glm::abs(eigenValues[i]));
+            //     maxEigenValue = glm::max(maxEigenValue, glm::abs(eigenValues[i]));
+            // }
+
+            // std::cout << "conditoned number: " << maxEigenValue / minEigenValue << std::endl;
+
+            // auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
+            // EigenSolver::BiCGSTAB::solve(A, b, x);
+        }
+
+        
+        // Compute all vertex values
         std::function<void(uint32_t, std::array<float, Inter::NumBasis>&)> getVertValue;
         getVertValue = [&](uint32_t vertId, std::array<float, Inter::NumBasis>& outValues)
         {
@@ -489,41 +556,62 @@ namespace SmoothSurfaceReconstruction
                 }
             }
         };
-        
+
         std::vector<std::array<float, Inter::NumBasis>> verticesValues(quad.getNumVertices());
         for(uint32_t i=0; i < quad.getNumVertices(); i++)
         {
             getVertValue(i, verticesValues[i]);
         }
 
+        return std::make_unique<CubicNodeTree<Dim>>(std::move(quad), std::move(verticesValues));
+    }
+
+
+    template<uint32_t Dim>
+    float computeCubicNodeLoss(const CubicNodeTree<Dim>& tree, const PointCloud<Dim>& cloud,  Config<Dim> config)
+    {
+        using NodeTreeConfig = NodeTree<Dim>::Config;
+        using Inter = BicubicInterpolation;
+        using Node = NodeTree<Dim>::Node;
+        using vec = ScalarField<Dim>::vec;
+
+        // Compute position and gradient error
+        float posError = 0.0f;
+        float gradError = 0.0f;
+        for(uint32_t i = 0; i < cloud.size(); i++)
+        {
+            vec nPos = cloud.point(i);
+            const float e = tree.eval(nPos);
+            posError += e*e;
+
+            vec nNorm = glm::normalize(cloud.normal(i));
+            vec n = tree.evalGrad(nPos);
+            gradError += glm::dot(nNorm, n);
+        }
+
+        // Compute laplacian error
         std::array<std::array<float, Inter::NumBasis>, Inter::NumControlPoints> nodeValues;
         float totalLaplacian = 0.0f;
-        for(const Node& node : quad)
+        for(const Node& node : tree.getNodeTree())
         {
             const vec nodeSize = node.maxCoord - node.minCoord;
             for(uint32_t i=0; i < Inter::NumControlPoints; i++)
             {
                 for(uint32_t j=0; j < Inter::NumBasis; j++)
                 {
-                    nodeValues[i][j] = verticesValues[node.controlPointsIdx[i]][j];
+                    nodeValues[i][j] = tree.getVerticesValues()[node.controlPointsIdx[i]][j];
                 }
             }
             const float val = BicubicInterpolation::integrateLaplacian(nodeSize, nodeValues);
-            // if(val < 0.0f)
-            // {
-            //     std::cout << "negative value " << val << std::endl;
-            // }
-            // if(val > 0.13617)
-            // {
-            //     // std::cout << numNodes << "big value " << val << std::endl;
-            // }
-            // std::cout << numNodes << "value " << val << std::endl;
             totalLaplacian += val;
         }
 
-        std::cout << "Total laplacian: " << totalLaplacian << std::endl;
+        float lossError = config.posWeight * posError + config.gradientWeight * gradError + config.smoothWeight * totalLaplacian;
 
-        return std::make_unique<CubicNodeTree<Dim>>(std::move(quad), std::move(verticesValues));
+        std::cout << "Total Laplacian: " << totalLaplacian << std::endl;
+        std::cout << "Loss: " << lossError << std::endl;
+
+        return lossError;
     }
 }
 #endif

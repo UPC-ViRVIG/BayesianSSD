@@ -1,7 +1,7 @@
 #include <iostream>
 #include "SmoothSurfaceReconstruction.h"
 #include "EigenSquareSolver.h"
-#include "Image.h"
+#include "MyImage.h"
 
 #include <cereal/archives/portable_binary.hpp>
 

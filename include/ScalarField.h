@@ -16,7 +16,7 @@ class ScalarField
 public:
 	using vec = VStruct<Dim>::type;
 
-	virtual float eval(vec point) = 0;
+	virtual float eval(vec point) const = 0;
 	virtual vec getMinCoord() = 0;
 	virtual vec getMaxCoord() = 0;
 };
@@ -30,7 +30,7 @@ public:
 	LinearNodeTree(NodeTree<Dim>&& nodeTree, std::vector<float>&& verticesValues) :
 		nodeTree(nodeTree), vValues(verticesValues) {}
 
-	float eval(vec point)
+	float eval(vec point) const
 	{
 		using Inter = MultivariateLinearInterpolation<Dim>;
 		std::optional<NodeTree<Dim>::Node> node;
@@ -166,7 +166,13 @@ public:
 	CubicNodeTree(NodeTree<Dim>&& nodeTree, std::vector<std::array<float, BicubicInterpolation::NumBasis>>&& verticesValues) :
 		nodeTree(nodeTree), vValues(verticesValues) {}
 
-	float eval(vec point)
+	CubicNodeTree(NodeTree<Dim>&& nodeTree, CubicNodeTree<Dim>& srcTree) :
+		nodeTree(nodeTree) 
+	{
+		copyValues(srcTree);
+	}
+
+	float eval(vec point) const
 	{
 		using Inter = BicubicInterpolation;
 		std::optional<NodeTree<Dim>::Node> node;
@@ -191,7 +197,7 @@ public:
 		return res;
 	}
 
-	vec evalGrad(vec point)
+	vec evalGrad(vec point) const
 	{
 		using Inter = BicubicInterpolation;
 		std::optional<NodeTree<Dim>::Node> node;
@@ -223,7 +229,11 @@ public:
 	vec getMinCoord() { return nodeTree.getMinCoord(); }
 	vec getMaxCoord() { return nodeTree.getMaxCoord(); }
 
-	NodeTree<Dim>& getNodeTree() { return nodeTree; }
+	const NodeTree<Dim>& getNodeTree() const { return nodeTree; }
+	const std::vector<std::array<float, BicubicInterpolation::NumBasis>>& getVerticesValues() const
+	{
+		return vValues;
+	}
 
 	float getMaxAbsValue() const
 	{
@@ -231,9 +241,37 @@ public:
 		for(const auto& bValues : vValues) absMax = glm::max(absMax, glm::abs(bValues[0]));
 		return absMax;
 	}
-private:
+public:
 	NodeTree<Dim> nodeTree;
 	std::vector<std::array<float, BicubicInterpolation::NumBasis>> vValues;
+
+	void copyValues(CubicNodeTree<Dim>& srcTree)
+	{
+		using Inter = BicubicInterpolation;
+		vValues.resize(nodeTree.getNumVertices());
+		for(uint32_t i=0; i < nodeTree.getNumVertices(); i++)
+		{
+			std::optional<NodeTree<Dim>::Node> node;
+			vec vPos = nodeTree.getVertices()[i];
+			srcTree.nodeTree.getNode(vPos, node);
+			if(node)
+			{
+				std::array<std::array<std::array<float, Inter::NumBasis>, Inter::NumControlPoints>, Inter::NumBasis> weights;
+				Inter::evalBasisValues(node->transformToLocalCoord(vPos), node->maxCoord - node->minCoord, weights);
+				for(uint32_t j=0; j < Inter::NumBasis; j++)
+				{
+					vValues[i][j] = 0.0f;
+					for(uint32_t k=0; k < Inter::NumControlPoints; k++)
+					{
+						for(uint32_t w=0; w < Inter::NumBasis; w++)
+						{
+							vValues[i][j] += weights[j][k][w] * srcTree.vValues[node->controlPointsIdx[k]][w];
+						}
+					}
+				}
+			}
+		}
+	}
 };
 
 #endif 
