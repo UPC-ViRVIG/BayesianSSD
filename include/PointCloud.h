@@ -13,7 +13,7 @@ class PointCloud
 {
 public:
 	using vec = VStruct<Dim>::type;
-	bool readFromFile(const std::string &filename) { return false; }
+	bool readFromFile(const std::string &filename, bool readVariance = false) { return false; }
 	
 	uint32_t size() const { return points.size(); }
 	vec &point(uint32_t index) { return points[index]; }
@@ -22,14 +22,17 @@ public:
 	const vec &normal(uint32_t index) const { return normals[index]; }
 	const std::vector<vec>& getPoints() const { return points; }
 	std::vector<vec>& getPoints() { return points; }
+	const float& variance(uint32_t index) const { return variances[index]; }
+	const std::vector<float>& getVariances() const { return variances; }
 
 private:
 	std::vector<vec> points, normals;
+	std::vector<float> variances;
 
 };
 
 template<>
-bool PointCloud<2>::readFromFile(const std::string &filename)
+bool PointCloud<2>::readFromFile(const std::string &filename, bool readVariance)
 {
 	std::ifstream fin;
 	unsigned int n;
@@ -41,6 +44,7 @@ bool PointCloud<2>::readFromFile(const std::string &filename)
 	fin >> n;
 	points.resize(n);
 	normals.resize(n);
+	variances.resize(n, 1.0f);
 	for(unsigned int i=0; i<n; i++)
 	{
 		fin >> v.x >> v.y;
@@ -48,6 +52,11 @@ bool PointCloud<2>::readFromFile(const std::string &filename)
 		fin >> v.x >> v.y;
 		v = glm::normalize(v);
 		normals[i] = v;
+		if(readVariance)
+		{
+			float val; fin >> val;
+			variances[i] = val;
+		}
 	}
 	fin.close();
 	
@@ -55,7 +64,7 @@ bool PointCloud<2>::readFromFile(const std::string &filename)
 }
 
 template<>
-bool PointCloud<3>::readFromFile(const std::string &filename)
+bool PointCloud<3>::readFromFile(const std::string &filename, bool readVariance)
 {
 	happly::PLYData plyIn(filename);
 

@@ -5,120 +5,7 @@
 #include "PoissonReconstruction.h"
 #include "EigenSquareSolver.h"
 #include "MyImage.h"
-
-template<typename SF>
-void drawScalarField(Image& image, SF& scalarField, 
-					 std::optional<std::reference_wrapper<PointCloud<2>>> cloud = std::optional<std::reference_wrapper<PointCloud<2>>>(), 
-					 bool drawGrid = true,
-					 std::optional<std::reference_wrapper<std::vector<float>>> verticesEnergy = std::optional<std::reference_wrapper<std::vector<float>>>())
-{
-	const NodeTree<2>& qtree = scalarField.getNodeTree();
-
-	const std::array<glm::vec3, 7> palette = {
-		glm::vec3(0.0f, 0.0f, 1.0f), 
-		glm::vec3(0.0f, 0.5f, 1.0f), 
-		glm::vec3(0.0f, 1.0f, 1.0f), 
-		glm::vec3(1.0f, 1.0f, 1.0f), 
-		glm::vec3(1.0f, 1.0f, 0.0f), 
-		glm::vec3(1.0f, 0.5f, 0.0f), 
-		glm::vec3(1.0f, 0.0f, 0.0f)
-	};
-	
-	const float maxValue = scalarField.getMaxAbsValue();
-	glm::vec2 minCoord = scalarField.getMinCoord();
-	glm::vec2 size = scalarField.getMaxCoord() - scalarField.getMinCoord();
-	for(uint32_t i=0; i < image.width(); i++)
-	{
-		for(uint32_t j=0; j < image.height(); j++)
-		{
-			glm::vec2 pos = glm::vec2((static_cast<float>(i)+0.5f) / static_cast<float>(image.width()), 
-									  (static_cast<float>(j)+0.5f) / static_cast<float>(image.height()));
-			pos = minCoord + pos * size;
-
-			// Field color
-			const float pval = scalarField.eval(pos);
-			float val = glm::clamp(pval / maxValue, -1.0f, 0.999999f);
-			val = static_cast<float>(palette.size() - 1) * 0.5f * (val + 1.0f);
-			uint32_t cid = glm::floor(val);
-			glm::vec3 bgColor = glm::mix(palette[cid], palette[cid+1], glm::fract(val));
-
-			// Gradient color
-			// const glm::vec2 grad = scalarField.evalGrad(pos);
-			// glm::vec3 bgColor = glm::vec3(glm::clamp(glm::abs(grad.x), 0.0f, 0.99999f), glm::clamp(glm::abs(grad.y), 0.0f, 0.99999f), 0.0f);
-
-			float aval = glm::abs(pval / maxValue);
-			// Isosurface line
-			float surfaceColorWeight = glm::clamp(1.0 - glm::pow(aval/0.004f, 12), 0.0, 1.0);
-			// float surfaceColorWeight = glm::clamp(1.0 - glm::pow(aval/0.01f, 12), 0.0, 1.0);
-
-			// Isolines
-			float valToLevel = 0.5f - glm::abs(glm::fract(aval / 0.03f) - 0.5);
-			float linesColorWeight = glm::clamp(1.0 - glm::pow(valToLevel * 0.03f/0.0015f, 12), 0.0, 1.0);
-			// linesColorWeight = 0.0f;
-
-			// Grid color
-			float gridColorWeight = 0.0f;
-			if (drawGrid) 
-			{
-				std::optional<NodeTree<2>::Node> node;
-				qtree.getNode(pos, node);
-				if(!node) continue;
-				glm::vec2 invSize = 1.0f / (node->maxCoord - node->minCoord);
-				glm::vec2 np = (pos - node->minCoord) * invSize;
-				np = glm::abs(2.0f * (np - glm::vec2(0.5f)));
-				// invSize *= 100.0f;
-				gridColorWeight = 0.8f * glm::smoothstep(1.0f - 0.005f * invSize.x, 1.0f - 0.003f * invSize.x, glm::max(np.x, np.y));
-			}
-
-			image(i, j) = glm::mix(bgColor, glm::vec3(0.0f), glm::max(glm::max(surfaceColorWeight, linesColorWeight), gridColorWeight));
-		}
-	}
-
-	if(cloud)
-	{
-		for (glm::vec2 point : cloud->get().getPoints())
-		{
-			point = (point-minCoord) / size;
-			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::vec3(0.35f, 0.35f, 0.35f));
-		}
-	}
-
-	if(verticesEnergy)
-	{
-		std::vector<float>& vEnergy = verticesEnergy->get();
-		const std::array<glm::vec3, 2> energyPalette = {
-			glm::vec3(1.0f, 1.0f, 1.0f), 
-			glm::vec3(1.0f, 0.0f, 0.0f)
-		};
-
-		const float maxV = *std::max_element(vEnergy.begin(), vEnergy.end());
-		for(uint32_t i=0; i < qtree.getNumVertices(); i++)
-		{
-			const glm::vec2 point = qtree.getVertices()[i];
-			for(uint32_t j = 0; j < 4; j++)
-			{
-				if(vEnergy[4 * i + j] == 0.0f) continue;
-				float val = static_cast<float>(energyPalette.size()-1) * glm::clamp(vEnergy[4 * i + j] / maxV, 0.0f, 0.9999f);
-				uint32_t cid = glm::floor(val);
-				glm::vec3 color = glm::mix(energyPalette[cid], energyPalette[cid+1], glm::fract(val));
-				glm::vec2 offset((j & 0b10) == 0 ? -2 : 2, (j & 0b01) == 0 ? -2 : 2);
-				if(image.width() * point.x + offset.x < 0.0f ||
-				   image.height() * point.y + offset.y < 0.0f) continue;
-				image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x + offset.x), static_cast<uint32_t>(image.height() * point.y + offset.y), 3, color);
-			}
-		}
-	}
-
-	// const auto& tJoinVertices = qtree.getTJointVerticesIndex();
-	// for(uint32_t vertId : tJoinVertices)
-	// {
-	// 	const glm::vec2 point = qtree.getVertices()[vertId];
-	// 	image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 5, glm::vec3(0.5f, 0.5f, 0.5f));
-	// }
-
-	// image.drawFilledCircle(static_cast<uint32_t>(image.width() * 0), static_cast<uint32_t>(image.height() * 0), 4, glm::vec3(1.0f, 0.0f, 0.0f));
-}
-
+#include "ScalarFieldRender.h"
 
 template<typename SF>
 void drawGradientMaginitudeImage(Image& image, SF& scalarField)
@@ -175,11 +62,151 @@ void drawGradientMaginitudeImage(Image& image, SF& scalarField)
 			float valToLevel = 0.5f - glm::abs(glm::fract(aval / 0.03f) - 0.5);
 			float linesColorWeight = glm::clamp(1.0 - glm::pow(valToLevel * 0.03f/0.0015f, 12), 0.0, 1.0);
 			linesColorWeight = 0;
-
 			image(i, j) = glm::mix(bgColor, glm::vec3(0.0f), glm::max(surfaceColorWeight, linesColorWeight));
 		}
 	}
 }
+
+template<typename SF>
+void drawScalarField(Image& image, SF& scalarField, 
+					 std::optional<std::reference_wrapper<PointCloud<2>>> cloud = std::optional<std::reference_wrapper<PointCloud<2>>>(), 
+					 bool drawGrid = true,
+					 std::optional<std::reference_wrapper<std::vector<float>>> verticesEnergy = std::optional<std::reference_wrapper<std::vector<float>>>())
+{
+	const NodeTree<2>& qtree = scalarField.getNodeTree();
+
+	const std::vector<glm::vec3> sdfPalette = {
+		glm::vec3(0.0f, 0.0f, 1.0f), 
+		glm::vec3(0.0f, 0.5f, 1.0f), 
+		glm::vec3(0.0f, 1.0f, 1.0f), 
+		glm::vec3(1.0f, 1.0f, 1.0f), 
+		glm::vec3(1.0f, 1.0f, 0.0f), 
+		glm::vec3(1.0f, 0.5f, 0.0f), 
+		glm::vec3(1.0f, 0.0f, 0.0f)
+	};
+
+	const float maxValue = scalarField.getMaxAbsValue();
+	ScalarFieldRender::renderScalarField(scalarField, image, [maxValue](float val) { return 0.5f * (1.0f + val / maxValue); }, sdfPalette,
+										 1.0f, 0.0f, 1.0f, 
+										 0.5f, 0.007f, 0.8f);
+
+	if(drawGrid)
+	{
+		ScalarFieldRender::renderNodeTreeGrid(qtree, image, 2.0f, 0.6f);
+	}
+
+	// const std::array<glm::vec3, 2> palette = {
+	// 	glm::vec3(1.0f, 1.0f, 1.0f), 
+	// 	glm::vec3(1.0f, 0.0f, 0.0f)
+	// };
+
+	if(cloud)
+	{
+		glm::vec2 minCoord = scalarField.getMinCoord();
+		glm::vec2 size = scalarField.getMaxCoord() - scalarField.getMinCoord();
+		for (glm::vec2 point : cloud->get().getPoints())
+		{
+			point = (point - minCoord) / size;
+			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::vec3(0.35f, 0.35f, 0.35f));
+		}
+	}
+
+	if(verticesEnergy)
+	{
+		std::vector<float>& vEnergy = verticesEnergy->get();
+		const std::array<glm::vec3, 2> energyPalette = {
+			glm::vec3(1.0f, 1.0f, 1.0f), 
+			glm::vec3(1.0f, 0.0f, 0.0f)
+		};
+
+		const float maxV = *std::max_element(vEnergy.begin(), vEnergy.end());
+		for(uint32_t i=0; i < qtree.getNumVertices(); i++)
+		{
+			const glm::vec2 point = qtree.getVertices()[i];
+			for(uint32_t j = 0; j < 4; j++)
+			{
+				if(vEnergy[4 * i + j] == 0.0f) continue;
+				float val = static_cast<float>(energyPalette.size()-1) * glm::clamp(vEnergy[4 * i + j] / maxV, 0.0f, 0.9999f);
+				uint32_t cid = glm::floor(val);
+				glm::vec3 color = glm::mix(energyPalette[cid], energyPalette[cid+1], glm::fract(val));
+				glm::vec2 offset((j & 0b10) == 0 ? -2 : 2, (j & 0b01) == 0 ? -2 : 2);
+				if(image.width() * point.x + offset.x < 0.0f ||
+				   image.height() * point.y + offset.y < 0.0f) continue;
+				image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x + offset.x), static_cast<uint32_t>(image.height() * point.y + offset.y), 3, color);
+			}
+		}
+	}
+
+	// const auto& tJoinVertices = qtree.getTJointVerticesIndex();
+	// for(uint32_t vertId : tJoinVertices)
+	// {
+	// 	const glm::vec2 point = qtree.getVertices()[vertId];
+	// 	image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 5, glm::vec3(0.5f, 0.5f, 0.5f));
+	// }
+
+	// image.drawFilledCircle(static_cast<uint32_t>(image.width() * 0), static_cast<uint32_t>(image.height() * 0), 4, glm::vec3(1.0f, 0.0f, 0.0f));
+}
+
+void drawCovField(Image& image, LinearNodeTree<2>& scalarField,
+				  std::optional<std::reference_wrapper<PointCloud<2>>> cloud = std::optional<std::reference_wrapper<PointCloud<2>>>())
+{
+	const NodeTree<2>& qtree = scalarField.getNodeTree();
+
+	const std::vector<glm::vec3> sdfPalette = {
+		glm::vec3(0.0f, 0.0f, 1.0f), 
+		glm::vec3(0.0f, 0.5f, 1.0f), 
+		glm::vec3(0.0f, 1.0f, 1.0f), 
+		glm::vec3(1.0f, 1.0f, 1.0f), 
+		glm::vec3(1.0f, 1.0f, 0.0f), 
+		glm::vec3(1.0f, 0.5f, 0.0f), 
+		glm::vec3(1.0f, 0.0f, 0.0f)
+	};
+
+	std::vector<glm::vec3> viridisPalette = {
+		glm::vec3(68.0f/255.0f, 1.0f/255.0f, 84.0f/255.0f),
+		glm::vec3(65.0f/255.0f, 68.0f/255.0f, 135.0f/255.0f),
+		glm::vec3(42.0f/255.0f, 120.0f/255.0f, 142.0f/255.0f),
+		glm::vec3(34.0f/255.0f, 163.0f/255.0f, 132.0f/255.0f),
+		glm::vec3(122.0f/255.0f, 209.0f/255.0f, 81.0f/255.0f),
+		glm::vec3(253.0f/255.0f, 231.0f/255.0f, 37.0f/255.0f)
+	};
+
+	const std::vector<glm::vec3> redPalette = {
+		glm::vec3(1.0f, 1.0f, 1.0f), 
+		glm::vec3(1.0f, 0.0f, 0.0f)
+	};
+
+	const float maxValue = 0.01 * scalarField.getMaxValue();
+	const float minValue = scalarField.getMinValue();
+	std::cout << "min " << minValue << " // max " << maxValue << std::endl;
+	ScalarFieldRender::renderScalarField(scalarField, image, 
+										 [minValue, maxValue](float val) { return (val - minValue) / (maxValue - minValue); }, 
+										 viridisPalette,
+										 0.0f, 0.0f, 1.0f, 
+										 0.0f, 0.001f, 0.8f);
+
+	if(cloud)
+	{
+		float min = INFINITY;
+		float max = -INFINITY;
+		for(float v : cloud->get().getVariances())
+		{
+			min = glm::min(min, v); max = glm::max(max, v);
+		}
+
+		if(max - min < 1e-6) max = min + 1.0f;
+
+		glm::vec2 minCoord = scalarField.getMinCoord();
+		glm::vec2 size = scalarField.getMaxCoord() - scalarField.getMinCoord();
+		for (uint32_t i = 0; i < cloud->get().size(); i++)
+		{
+			glm::vec2 point = (cloud->get().point(i) - minCoord) / size;
+			const float colorVal = (cloud->get().variance(i) - min) / (max - min);
+			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::mix(redPalette[0], redPalette[1], colorVal));
+		}
+	}
+}
+	
 
 // template <typename T>
 // void write_array_to_file(const std::vector<T>& arr, const std::string& filename) {
@@ -228,7 +255,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 	
-	if(!cloud.readFromFile(argv[1]))
+	if(!cloud.readFromFile(argv[1], true))
 	{
 		std::cout << "Input cloud could not be read!" << std::endl;
 		return -1;
@@ -243,7 +270,7 @@ int main(int argc, char *argv[])
     glm::vec2 max(-INFINITY);
     for(glm::vec2 p : cloud.getPoints())
     {
-        for(uint32_t i=0; i < 3; i++)
+        for(uint32_t i=0; i < 2; i++)
         {
             min[i] = glm::min(min[i], p[i]);
             max[i] = glm::max(max[i], p[i]);
@@ -262,7 +289,7 @@ int main(int argc, char *argv[])
 		// .maxCoord = NodeTree<2>::vec(1.0f),
 		.minCoord = center - glm::vec2(0.5f * maxSize),
 		.maxCoord = center + glm::vec2(0.5f * maxSize),
-		.pointFilterMaxDistance = 100.33f * maxSize / static_cast<float>(1 << maxDepth),
+		.pointFilterMaxDistance = 1000000.33f * maxSize / static_cast<float>(1 << maxDepth),
 		//.pointFilterMaxDistance = 0.0f,
 		.constraintNeighbourNodes = true,
 		.maxDepth = maxDepth
@@ -290,9 +317,9 @@ int main(int argc, char *argv[])
 	// std::unique_ptr<LinearNodeTree<2>> scalarField = std::make_unique<LinearNodeTree<2>>(std::move(quad), std::move(vValues));
 
 	SmoothSurfaceReconstruction::Config<2> config = {
-		.posWeight = 200.0f, 
-        .gradientWeight = 200.0f,
-        .smoothWeight = 1.0f
+		.posWeight = 2.0f, 
+        .gradientWeight = 2.0f,
+        .smoothWeight = 0.01f
 	};
 
 	// PoissonReconstruction::Config<2> config = {};
@@ -302,13 +329,15 @@ int main(int argc, char *argv[])
 	// std::unique_ptr<CubicNodeTree<2>> scalarField = 
 	// 	SmoothSurfaceReconstruction::compute2DCubicNodeTree<2>(cloud, config, std::nullopt, verticesEnergy, eigenValues);
 
-	std::unique_ptr<CubicNodeTree<2>> scalarField = 
-		SmoothSurfaceReconstruction::compute2DCubicNodeTree<2>(std::move(quad), cloud, config, verticesEnergy, eigenValues);
+	// std::unique_ptr<CubicNodeTree<2>> scalarField = 
+	// 	SmoothSurfaceReconstruction::compute2DCubicNodeTree<2>(std::move(quad), cloud, config, verticesEnergy, eigenValues);
+		
+	// SmoothSurfaceReconstruction::computeCubicNodeLoss<2>(*scalarField, cloud, config);
 
-	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
-	// 	PoissonReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config);
+	std::optional<LinearNodeTree<2>> covScalarField;
 
-	SmoothSurfaceReconstruction::computeCubicNodeLoss<2>(*scalarField, cloud, config);
+	std::unique_ptr<LinearNodeTree<2>> scalarField = 
+		SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config, covScalarField);
 
 	write_array_to_file(eigenValues, "eigenValues.bin");
 
@@ -337,6 +366,11 @@ int main(int argc, char *argv[])
 	image.init(2048, 2048);
 	drawScalarField(image, *scalarField, cloud, true);
 	image.savePNG("quadtree.png");
+
+	Image cimage;
+	cimage.init(2048, 2048);
+	drawCovField(cimage, *covScalarField, cloud);
+	cimage.savePNG("quadtreeCov.png");
 
 	// Image imageG;
 	// imageG.init(2048, 2048);

@@ -19,6 +19,12 @@ public:
 	virtual float eval(vec point) const = 0;
 	virtual vec getMinCoord() = 0;
 	virtual vec getMaxCoord() = 0;
+
+	virtual vec evalGrad(vec point) const
+	{
+		// TODO: implement numeric gradiant estimation
+		return vec(0.0f);
+	}
 };
 
 template<uint32_t Dim>
@@ -51,6 +57,31 @@ public:
 		return res;
 	}
 
+	vec evalGrad(vec point) const override
+	{
+		using Inter = MultivariateLinearInterpolation<Dim>;
+		std::optional<NodeTree<Dim>::Node> node;
+		nodeTree.getNode(point, node);
+		if(!node)
+		{
+			std::cout << "out of bounds" << std::endl;
+			return vec(0.0f);
+		}
+
+		std::array<std::array<float, Inter::NumControlPoints>, Dim> weigths;
+		Inter::evalGrad(node->transformToLocalCoord(point), weigths);
+		vec res;
+		for(uint32_t d = 0; d < Dim; d++)
+		{
+			res[d] = 0.0f;
+			for(uint32_t i = 0; i < Inter::NumControlPoints; i++)
+			{
+				res[d] += vValues[node->controlPointsIdx[i]] * weigths[d][i];
+			}
+		}
+		return res;
+	}
+
 	vec getMinCoord() { return nodeTree.getMinCoord(); }
 	vec getMaxCoord() { return nodeTree.getMaxCoord(); }
 
@@ -61,6 +92,20 @@ public:
 		float absMax = 0.0f;
 		for(float v : vValues) absMax = glm::max(absMax, glm::abs(v));
 		return absMax;
+	}
+
+	float getMaxValue() const
+	{
+		float max = -INFINITY;
+		for(float v : vValues) max = glm::max(max, v);
+		return max;
+	}
+
+	float getMinValue() const
+	{
+		float min = INFINITY;
+		for(float v : vValues) min = glm::min(min, v);
+		return min;
 	}
 
 	// EXPORT FIELD AS IN SDFLIB
@@ -197,7 +242,7 @@ public:
 		return res;
 	}
 
-	vec evalGrad(vec point) const
+	vec evalGrad(vec point) override
 	{
 		using Inter = BicubicInterpolation;
 		std::optional<NodeTree<Dim>::Node> node;

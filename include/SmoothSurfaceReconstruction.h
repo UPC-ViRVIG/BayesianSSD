@@ -40,8 +40,9 @@ namespace SmoothSurfaceReconstruction
         float smoothWeight;
     };
 
-    template<uint32_t Dim, typename Solver>
-    std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config)
+    template<uint32_t Dim>
+    std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
+                                                               std::optional<LinearNodeTree<Dim>>& outCovariance)
     {
         using NodeTreeConfig = NodeTree<Dim>::Config;
         using Inter = MultivariateLinearInterpolation<Dim>;
@@ -86,7 +87,6 @@ namespace SmoothSurfaceReconstruction
         }
 
         const uint32_t numUnknows = quad.getNumVertices() - tJoinVertices.size();
-        Solver solver(numUnknows);
 
         std::vector<uint32_t> vertIdToUnknownVertId(quad.getNumVertices());
 
@@ -102,22 +102,27 @@ namespace SmoothSurfaceReconstruction
             else vertIdToUnknownVertId[i] = nextUnknownId++;
         }
 
-        std::function<void(uint32_t, float)> setUnkownValue;
-        setUnkownValue = [&](uint32_t vertId, float value)
+        std::function<void(EigenSparseMatrix& mat, uint32_t, float)> setUnkownValue;
+        setUnkownValue = [&](EigenSparseMatrix& mat, uint32_t vertId, float value)
         {
             if(vertIdToUnknownVertId[vertId] == std::numeric_limits<uint32_t>::max())
             {
                 const ConstrainedUnknown& constraint = constraints[vertId];
                 for(uint32_t i=0; i < constraint.numOperators; i++)
                 {
-                    setUnkownValue(constraint.vertIds[i], value * constraint.weights[i]);
+                    setUnkownValue(mat, constraint.vertIds[i], value * constraint.weights[i]);
                 }
             }
             else
             {
-                solver.addTerm(vertIdToUnknownVertId[vertId], value);
+                mat.addTerm(vertIdToUnknownVertId[vertId], value);
             }
         };
+
+        EigenSparseMatrix pointsMatrix(numUnknows);
+        EigenSparseMatrix pointsCovMatrix(cloud.size());
+        EigenSparseMatrix gradientMatrix(numUnknows);
+        EigenVector gradientVector;
 
         // Generate point equations
         for(uint32_t i = 0; i < cloud.size(); i++)
@@ -131,10 +136,11 @@ namespace SmoothSurfaceReconstruction
             Inter::eval(nnPos, weights);
 
             for(uint32_t i = 0; i < Inter::NumControlPoints; i++) 
-                setUnkownValue(node->controlPointsIdx[i], config.posWeight * weights[i]);
+                setUnkownValue(pointsMatrix, node->controlPointsIdx[i], config.posWeight * weights[i]);
 
-            solver.addConstantTerm(0.0f);
-            solver.endEquation();
+            pointsCovMatrix.addTerm(i, cloud.variance(i));
+            pointsCovMatrix.endEquation();
+            pointsMatrix.endEquation();
 
             vec nNorm = glm::normalize(cloud.normal(i));
             std::array<std::array<float, Inter::NumControlPoints>, Dim> gradWeights;
@@ -144,17 +150,18 @@ namespace SmoothSurfaceReconstruction
             {
                 for(uint32_t i=0; i < Inter::NumControlPoints; i++)
                 {
-                    setUnkownValue(node->controlPointsIdx[i], config.gradientWeight * gradWeights[j][i]);
+                    setUnkownValue(gradientMatrix, node->controlPointsIdx[i], config.gradientWeight * gradWeights[j][i]);
                 }
 
-                solver.addConstantTerm(config.gradientWeight * nNorm[j]);
-                solver.endEquation();
+                gradientVector.addTerm(config.gradientWeight * nNorm[j]);
+                gradientMatrix.endEquation();
             }
         }
 
         // Generate Node equations
+        EigenSparseMatrix smoothMatrix(numUnknows);
         const unsigned int numNodesAtMaxDepth = 1 << quad.getMaxDepth();
-        const vec nodeSize = (quad.getMaxCoord() - quad.getMinCoord()) / static_cast<float>(numNodesAtMaxDepth);
+        const vec nodeSize = (quad.getMaxCoord() - quad.getMinCoord()) / static_cast<float>(numNodesAtMaxDepth) - vec(1e-6);
         for(uint32_t i = 0; i < quad.getNumVertices(); i++)
         {
             if(vertIdToUnknownVertId[i] == std::numeric_limits<uint32_t>::max())
@@ -189,7 +196,7 @@ namespace SmoothSurfaceReconstruction
 					{
 						if(glm::abs(weights[j]) > 1e-8)
 						{
-							setUnkownValue(node->controlPointsIdx[j], config.smoothWeight * weights[j]);
+							setUnkownValue(smoothMatrix, node->controlPointsIdx[j], config.smoothWeight * weights[j]);
 						}
 					}
 				}
@@ -197,14 +204,50 @@ namespace SmoothSurfaceReconstruction
 
 			if(numValidSides > 0) 
             {
-                setUnkownValue(i, -config.smoothWeight * 2.0f * static_cast<float>(numValidSides));
-                solver.addConstantTerm(0.0f);
-                solver.endEquation();
+                setUnkownValue(smoothMatrix, i, -config.smoothWeight * 2.0f * static_cast<float>(numValidSides));
+                smoothMatrix.endEquation();
             }
         }
 
+        Eigen::SparseMatrix<double> P = pointsMatrix.getMatrix();
+        Eigen::MatrixXd covP = Eigen::MatrixXd(pointsCovMatrix.getMatrix());
+        Eigen::SparseMatrix<double> N = gradientMatrix.getMatrix();
+        Eigen::SparseMatrix<double> S = smoothMatrix.getMatrix();
+        
+        Eigen::VectorXd b = N.transpose() * gradientVector.getVector();
+        Eigen::MatrixXd mP = Eigen::MatrixXd(P);
+        Eigen::MatrixXd mS = Eigen::MatrixXd(S);
+        Eigen::MatrixXd mN = Eigen::MatrixXd(N);
+        Eigen::MatrixXd SVDmat = mP.transpose() * covP.inverse() * mP + mS.transpose() * mS;
+        // Eigen::MatrixXd SVDmat = mS.transpose() * mS;
+        Eigen::JacobiSVD<Eigen::MatrixXd> svd(SVDmat, Eigen::ComputeThinU | Eigen::ComputeThinV);
+        Eigen::VectorXd sv = svd.singularValues();
+        uint32_t numZeros = 0;
+        for(uint32_t i=0; i < sv.size(); i++)
+        {
+            if(sv(i) > 1e-9)
+            {
+                sv(i) = 1.0f / sv(i);
+            }
+            else
+            {
+                numZeros++;
+                sv(i) = 0.0f;
+            }
+        }
+        std::cout << "num zeros " << numZeros << std::endl;
+        Eigen::MatrixXd invSVDmat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
+
+        // Eigen::MatrixXd Ca = SVDmat.inverse() * mP.transpose();
+        // Eigen::MatrixXd CovX = Ca * covP * Ca.transpose();
+
+        Eigen::MatrixXd CovX = invSVDmat;
+        
+        Eigen::SparseMatrix<double> A = P.transpose() * covP.inverse() * P + N.transpose() * N + S.transpose() * S;
         std::vector<double> unknownsValues(numUnknows);
-        solver.solve(unknownsValues);
+        auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
+
+        EigenSolver::BiCGSTAB::solve(A, b, x);
 
         std::function<float(uint32_t)> getVertValue;
         getVertValue = [&](uint32_t vertId) -> float
@@ -221,12 +264,36 @@ namespace SmoothSurfaceReconstruction
             }
             else return static_cast<float>(unknownsValues[vertIdToUnknownVertId[vertId]]);
         };
+
+        std::function<float(uint32_t)> getVertCov;
+        getVertCov = [&](uint32_t vertId) -> float
+        {
+            if(vertIdToUnknownVertId[vertId] == std::numeric_limits<uint32_t>::max())
+            {
+                const ConstrainedUnknown& constraint = constraints[vertId];
+                float res = 0.0f;
+                for(uint32_t i=0; i < constraint.numOperators; i++)
+                {
+                    res += constraint.weights[i] * getVertCov(constraint.vertIds[i]);
+                }
+                return res;
+            }
+            else
+            {
+                const uint32_t id = vertIdToUnknownVertId[vertId];
+                return static_cast<float>(CovX(id, id));
+            }
+        };
         
         std::vector<float> verticesValues(quad.getNumVertices());
+        std::vector<float> verticesCov(quad.getNumVertices());
         for(uint32_t i=0; i < quad.getNumVertices(); i++)
         {
             verticesValues[i] = getVertValue(i);
+            verticesCov[i] = getVertCov(i);
         }
+
+        outCovariance = std::optional<LinearNodeTree<Dim>>(LinearNodeTree<Dim>(NodeTree<Dim>(quad), std::move(verticesCov)));
 
         return std::make_unique<LinearNodeTree<Dim>>(std::move(quad), std::move(verticesValues));
     }
