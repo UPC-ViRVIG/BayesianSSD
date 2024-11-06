@@ -1,11 +1,15 @@
 #include <iostream>
 #include <vector>
 #include <fstream>
+#include <cmath>
+#include <numbers>
 #include "SmoothSurfaceReconstruction.h"
 #include "PoissonReconstruction.h"
 #include "EigenSquareSolver.h"
 #include "MyImage.h"
 #include "ScalarFieldRender.h"
+
+#define M_PI 3.14159265359
 
 template<typename SF>
 void drawGradientMaginitudeImage(Image& image, SF& scalarField)
@@ -176,11 +180,14 @@ void drawCovField(Image& image, LinearNodeTree<2>& scalarField,
 		glm::vec3(1.0f, 0.0f, 0.0f)
 	};
 
-	const float maxValue = 0.01 * scalarField.getMaxValue();
-	const float minValue = scalarField.getMinValue();
+	auto op = [](float val) { return glm::sqrt(val); };
+
+	float maxValue = op(scalarField.getMaxValue());
+	const float minValue = op(scalarField.getMinValue());
 	std::cout << "min " << minValue << " // max " << maxValue << std::endl;
+	maxValue = 0.99 * maxValue;
 	ScalarFieldRender::renderScalarField(scalarField, image, 
-										 [minValue, maxValue](float val) { return (val - minValue) / (maxValue - minValue); }, 
+										 [minValue, maxValue, &op](float val) { return (op(val) - minValue) / (maxValue - minValue); }, 
 										 viridisPalette,
 										 0.0f, 0.0f, 1.0f, 
 										 0.0f, 0.001f, 0.8f);
@@ -198,6 +205,75 @@ void drawCovField(Image& image, LinearNodeTree<2>& scalarField,
 
 		glm::vec2 minCoord = scalarField.getMinCoord();
 		glm::vec2 size = scalarField.getMaxCoord() - scalarField.getMinCoord();
+		for (uint32_t i = 0; i < cloud->get().size(); i++)
+		{
+			glm::vec2 point = (cloud->get().point(i) - minCoord) / size;
+			const float colorVal = (cloud->get().variance(i) - min) / (max - min);
+			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::mix(redPalette[0], redPalette[1], colorVal));
+		}
+	}
+}
+
+void drawCollisionField(Image& image, LinearNodeTree<2>& muField, LinearNodeTree<2>& varField, bool printDensity,
+				        std::optional<std::reference_wrapper<PointCloud<2>>> cloud = std::optional<std::reference_wrapper<PointCloud<2>>>())
+{
+	const NodeTree<2>& qtree = muField.getNodeTree();
+
+	std::vector<glm::vec3> viridisPalette = {
+		glm::vec3(68.0f/255.0f, 1.0f/255.0f, 84.0f/255.0f),
+		glm::vec3(65.0f/255.0f, 68.0f/255.0f, 135.0f/255.0f),
+		glm::vec3(42.0f/255.0f, 120.0f/255.0f, 142.0f/255.0f),
+		glm::vec3(34.0f/255.0f, 163.0f/255.0f, 132.0f/255.0f),
+		glm::vec3(122.0f/255.0f, 209.0f/255.0f, 81.0f/255.0f),
+		glm::vec3(253.0f/255.0f, 231.0f/255.0f, 37.0f/255.0f)
+	};
+
+	const std::vector<glm::vec3> redPalette = {
+		glm::vec3(1.0f, 1.0f, 1.0f), 
+		glm::vec3(1.0f, 0.0f, 0.0f)
+	};
+
+	auto cdf = [](float x, float mu, float std)
+	{
+		return 0.5f * (1.0f + glm::abs(erf((x - mu) / (glm::sqrt(2.0f) * std))));
+	};
+
+	auto op = [&](glm::vec2 pos) 
+	{
+		float mu = muField.eval(pos);
+		float std = glm::sqrt(varField.eval(pos));
+		if(printDensity)
+		{
+			return 1.0f / (glm::sqrt(2.0f * static_cast<float>(std::numbers::pi)) * std) * glm::exp(-0.5f * mu * mu / (std * std));
+		}
+		else
+		{
+			if(mu > 0.0f)
+			{
+				return 1.0f - cdf(0.0f, mu, std);
+			}
+			else
+			{
+				return cdf(0.0f, mu, std);
+			}
+		}
+	};
+
+	ScalarFieldRender::renderColorField(muField, op, image, viridisPalette);
+
+	if(cloud)
+	{
+		float min = INFINITY;
+		float max = -INFINITY;
+		for(float v : cloud->get().getVariances())
+		{
+			min = glm::min(min, v); max = glm::max(max, v);
+		}
+
+		if(max - min < 1e-6) max = min + 1.0f;
+
+		glm::vec2 minCoord = muField.getMinCoord();
+		glm::vec2 size = muField.getMaxCoord() - muField.getMinCoord();
 		for (uint32_t i = 0; i < cloud->get().size(); i++)
 		{
 			glm::vec2 point = (cloud->get().point(i) - minCoord) / size;
@@ -283,13 +359,13 @@ int main(int argc, char *argv[])
     // Add margin
     maxSize = 1.2f * maxSize;
 
-	const uint32_t maxDepth = 5;
+	const uint32_t maxDepth = 7;
 	NodeTree<2>::Config quadConfig = {
 		// .minCoord = NodeTree<2>::vec(0.0f),
 		// .maxCoord = NodeTree<2>::vec(1.0f),
 		.minCoord = center - glm::vec2(0.5f * maxSize),
 		.maxCoord = center + glm::vec2(0.5f * maxSize),
-		.pointFilterMaxDistance = 1000000.33f * maxSize / static_cast<float>(1 << maxDepth),
+		.pointFilterMaxDistance = 0.8f * maxSize / static_cast<float>(1 << maxDepth),
 		//.pointFilterMaxDistance = 0.0f,
 		.constraintNeighbourNodes = true,
 		.maxDepth = maxDepth
@@ -317,9 +393,10 @@ int main(int argc, char *argv[])
 	// std::unique_ptr<LinearNodeTree<2>> scalarField = std::make_unique<LinearNodeTree<2>>(std::move(quad), std::move(vValues));
 
 	SmoothSurfaceReconstruction::Config<2> config = {
-		.posWeight = 2.0f, 
-        .gradientWeight = 2.0f,
-        .smoothWeight = 0.01f
+		.posWeight = 1.0f, 
+        .gradientWeight = 1.0f,
+        .smoothWeight = 1.0f,
+		.algorithm = SmoothSurfaceReconstruction::Algorithm::GP
 	};
 
 	// PoissonReconstruction::Config<2> config = {};
@@ -371,6 +448,20 @@ int main(int argc, char *argv[])
 	cimage.init(2048, 2048);
 	drawCovField(cimage, *covScalarField, cloud);
 	cimage.savePNG("quadtreeCov.png");
+
+	{
+		Image colimage;
+		colimage.init(2048, 2048);
+		drawCollisionField(colimage, *scalarField, *covScalarField, false, cloud);
+		colimage.savePNG("quadtreePInside.png");
+	}
+
+	{
+		Image colimage;
+		colimage.init(2048, 2048);
+		drawCollisionField(colimage, *scalarField, *covScalarField, true, cloud);
+		colimage.savePNG("quadtreePSurface.png");
+	}
 
 	// Image imageG;
 	// imageG.init(2048, 2048);

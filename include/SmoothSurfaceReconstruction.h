@@ -32,12 +32,20 @@ void write_array_to_file(const std::vector<T>& arr, const std::string& filename)
 
 namespace SmoothSurfaceReconstruction
 {
+    enum Algorithm
+    {
+        VAR,
+        BAYESIAN,
+        GP   
+    };
+
     template<uint32_t Dim>
     struct Config
     {
         float posWeight;
         float gradientWeight;
         float smoothWeight;
+        Algorithm algorithm;
     };
 
     template<uint32_t Dim>
@@ -135,8 +143,8 @@ namespace SmoothSurfaceReconstruction
             const vec nnPos = node->transformToLocalCoord(nPos);
             Inter::eval(nnPos, weights);
 
-            for(uint32_t i = 0; i < Inter::NumControlPoints; i++) 
-                setUnkownValue(pointsMatrix, node->controlPointsIdx[i], config.posWeight * weights[i]);
+            for(uint32_t i = 0; i < Inter::NumControlPoints; i++)
+                setUnkownValue(pointsMatrix, node->controlPointsIdx[i], weights[i]);
 
             pointsCovMatrix.addTerm(i, cloud.variance(i));
             pointsCovMatrix.endEquation();
@@ -150,15 +158,16 @@ namespace SmoothSurfaceReconstruction
             {
                 for(uint32_t i=0; i < Inter::NumControlPoints; i++)
                 {
-                    setUnkownValue(gradientMatrix, node->controlPointsIdx[i], config.gradientWeight * gradWeights[j][i]);
+                    setUnkownValue(gradientMatrix, node->controlPointsIdx[i], gradWeights[j][i]);
                 }
 
-                gradientVector.addTerm(config.gradientWeight * nNorm[j]);
+                gradientVector.addTerm(nNorm[j]);
                 gradientMatrix.endEquation();
             }
         }
 
         // Generate Node equations
+        constexpr bool extrapolateLaplacian = false;
         EigenSparseMatrix smoothMatrix(numUnknows);
         const unsigned int numNodesAtMaxDepth = 1 << quad.getMaxDepth();
         const vec nodeSize = (quad.getMaxCoord() - quad.getMinCoord()) / static_cast<float>(numNodesAtMaxDepth) - vec(1e-6);
@@ -176,35 +185,62 @@ namespace SmoothSurfaceReconstruction
                 
                 std::optional<Node> node;
 				bool valid = true;
+                float validSign = 0.0f;
 				for(float sign : {-1.0f, 1.0f})
 				{
                     const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
 					quad.getNode(coord, node);
-					if(!node) { valid = false; break; }
+					if(!node) { 
+                        valid = false;
+                        validSign = -sign; // The valid sign is the opposite one
+                        break;
+                    }
 				}
 
-				if(!valid) continue;
-				numValidSides++;
-
-				for(float sign : {-1.0f, 1.0f})
-				{
-                    const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
-					quad.getNode(coord, node);
-					std::array<float, Inter::NumControlPoints> weights;
-					Inter::eval(node->transformToLocalCoord(coord), weights);
-					for(uint32_t j=0; j < Inter::NumControlPoints; j++)
-					{
-						if(glm::abs(weights[j]) > 1e-8)
-						{
-							setUnkownValue(smoothMatrix, node->controlPointsIdx[j], config.smoothWeight * weights[j]);
-						}
-					}
-				}
+                // All the sides are valid
+				// if(!valid) continue;
+                if(valid)
+                {
+                    for(float sign : {-1.0f, 1.0f})
+                    {
+                        const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
+                        quad.getNode(coord, node);
+                        std::array<float, Inter::NumControlPoints> weights;
+                        Inter::eval(node->transformToLocalCoord(coord), weights);
+                        for(uint32_t j=0; j < Inter::NumControlPoints; j++)
+                        {
+                            if(glm::abs(weights[j]) > 1e-8)
+                            {
+                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], 0.5f * weights[j]);
+                            }
+                        }
+                    }
+                    numValidSides++;
+                }
+                else if(extrapolateLaplacian)
+                {
+                    for(uint32_t j = 1; j <= 2; j++)
+                    {
+                        const vec coord = quad.getVertices()[i] + (validSign * static_cast<float>(j)) * nodeSize * side;
+                        quad.getNode(coord, node);
+                        std::array<float, Inter::NumControlPoints> weights;
+                        Inter::eval(node->transformToLocalCoord(coord), weights);
+                        float w = (j == 1) ? 2.0f : -1.0f;
+                        for(uint32_t j=0; j < Inter::NumControlPoints; j++)
+                        {
+                            if(glm::abs(weights[j]) > 1e-8)
+                            {
+                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], w * weights[j]);
+                            }
+                        }
+                    }
+                    numValidSides++;
+                }
 			}
 
 			if(numValidSides > 0) 
             {
-                setUnkownValue(smoothMatrix, i, -config.smoothWeight * 2.0f * static_cast<float>(numValidSides));
+                setUnkownValue(smoothMatrix, i, -static_cast<float>(numValidSides));
                 smoothMatrix.endEquation();
             }
         }
@@ -213,13 +249,30 @@ namespace SmoothSurfaceReconstruction
         Eigen::MatrixXd covP = Eigen::MatrixXd(pointsCovMatrix.getMatrix());
         Eigen::SparseMatrix<double> N = gradientMatrix.getMatrix();
         Eigen::SparseMatrix<double> S = smoothMatrix.getMatrix();
+        float invVarSmoothing = config.smoothWeight * config.smoothWeight;
+        float invVarGradient = config.gradientWeight * config.gradientWeight;
         
         Eigen::VectorXd b = N.transpose() * gradientVector.getVector();
         Eigen::MatrixXd mP = Eigen::MatrixXd(P);
         Eigen::MatrixXd mS = Eigen::MatrixXd(S);
         Eigen::MatrixXd mN = Eigen::MatrixXd(N);
-        Eigen::MatrixXd SVDmat = mP.transpose() * covP.inverse() * mP + mS.transpose() * mS;
-        // Eigen::MatrixXd SVDmat = mS.transpose() * mS;
+        Eigen::MatrixXd SVDmat;
+
+
+        switch(config.algorithm)
+        {
+            case VAR:
+                SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
+                break;
+            case BAYESIAN:
+                SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
+                break;
+            case GP:
+                // SVDmat = invVarSmoothing * mS.transpose() * mS;
+                SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
+                break;
+        }
+
         Eigen::JacobiSVD<Eigen::MatrixXd> svd(SVDmat, Eigen::ComputeThinU | Eigen::ComputeThinV);
         Eigen::VectorXd sv = svd.singularValues();
         uint32_t numZeros = 0;
@@ -238,12 +291,22 @@ namespace SmoothSurfaceReconstruction
         std::cout << "num zeros " << numZeros << std::endl;
         Eigen::MatrixXd invSVDmat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
 
-        // Eigen::MatrixXd Ca = SVDmat.inverse() * mP.transpose();
-        // Eigen::MatrixXd CovX = Ca * covP * Ca.transpose();
+        Eigen::MatrixXd CovX;
 
-        Eigen::MatrixXd CovX = invSVDmat;
+        switch(config.algorithm)
+        {
+            case VAR:
+                CovX = invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
+                break;
+            case BAYESIAN:
+                CovX = invSVDmat;
+                break;
+            case GP:
+                CovX = invSVDmat - invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
+                break;
+        }
         
-        Eigen::SparseMatrix<double> A = P.transpose() * covP.inverse() * P + N.transpose() * N + S.transpose() * S;
+        Eigen::SparseMatrix<double> A = P.transpose() * covP.inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * S.transpose() * S;
         std::vector<double> unknownsValues(numUnknows);
         auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
 

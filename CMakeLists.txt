@@ -65,8 +65,9 @@ endif()
 
 
 file(GLOB SOURCE_FILES ./src/*.cpp)
-add_executable(recon src/tools/2D/main.cpp ${SOURCE_FILES})
+add_executable(${PROJECT_NAME} src/tools/2D/main.cpp ${SOURCE_FILES})
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_include_directories(${PROJECT_NAME} PUBLIC include)
 target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm happly cereal::cereal)
+target_compile_options(${PROJECT_NAME} PRIVATE "/bigobj")
 # target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm cereal::cereal)

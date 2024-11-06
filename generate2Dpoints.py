@@ -4,7 +4,7 @@ import pathlib
 
 SAMPLE_POINTS = 30
 POINTS_SIZE = 1.0
-OUT_FILE = "C:/Users/user/Documents/reconstruction/data/myshape1.txt"
+OUT_FILE = "C:/Users/user/Documents/reconstruction/data/myshape.txt"
 
 def sum(a, b):
     return [a[0] + b[0], a[1] + b[1]]
@@ -311,7 +311,7 @@ else:
             p = [obj.svg_get("cx", False), obj.svg_get("cy", False)]
             tan = [obj.svg_get("opt-tx", False), obj.svg_get("opt-ty", False)]
             rad = obj.svg_get("r", False)
-            rad = [] if rad == None else [rad]
+            rad = [] if rad == None else [rad * rad]
             if p[0] != None and p[1] != None and \
                tan[0] != None and tan[1] != None:
                 points.append(p + tan + rad)

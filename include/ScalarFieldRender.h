@@ -81,6 +81,31 @@ namespace ScalarFieldRender
             }
         }
     }
+
+    void renderColorField(ScalarField<2>& scalarField, std::function<float(glm::vec2)> colorField, Image& outImage, const std::vector<glm::vec3>& colorPalette)
+    {
+        glm::vec2 minCoord = scalarField.getMinCoord();
+        glm::vec2 size = scalarField.getMaxCoord() - scalarField.getMinCoord();
+        glm::vec2 invSize = 1.0f / size;
+        float invSizeMag = glm::length(glm::vec2(outImage.width(), outImage.height()) * invSize);
+        float winSizeMag = glm::length(glm::vec2(outImage.width(), outImage.height()));
+        for(uint32_t i=0; i < outImage.width(); i++)
+        {
+            for(uint32_t j=0; j < outImage.height(); j++)
+            {
+                glm::vec2 pos = glm::vec2((static_cast<float>(i)+0.5f) / static_cast<float>(outImage.width()), 
+									  (static_cast<float>(j)+0.5f) / static_cast<float>(outImage.height()));
+			    pos = minCoord + pos * size;
+
+                // Field color
+                float val = colorField(pos);
+                float nVal = static_cast<float>(colorPalette.size() - 1) * glm::clamp(val, 0.0f, 0.999999f); 
+                uint32_t cid = glm::floor(nVal);
+                glm::vec3 bgColor = glm::mix(colorPalette[cid], colorPalette[cid+1], glm::fract(nVal));
+                outImage(i, j) = bgColor;
+            }
+        }
+    }
 }
 
 #endif
