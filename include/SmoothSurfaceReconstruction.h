@@ -10,6 +10,8 @@
 #include "EigenSolver.h"
 #include <Eigen/Eigenvalues>
 
+#define M_PI 3.14159265359
+
 #include <fstream>
 template <typename T>
 void write_array_to_file(const std::vector<T>& arr, const std::string& filename) {
@@ -50,7 +52,13 @@ namespace SmoothSurfaceReconstruction
 
     template<uint32_t Dim>
     std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
-                                                               std::optional<LinearNodeTree<Dim>>& outCovariance)
+                                                               std::optional<LinearNodeTree<Dim>>& outCovariance = {},
+                                                               std::optional<Eigen::MatrixXd>& invCovMat = {},
+                                                               std::optional<Eigen::MatrixXd>& covMat = {},
+                                                               std::optional<Eigen::SparseMatrix<double>>& outP = {},
+                                                               std::optional<Eigen::SparseMatrix<double>>& outN = {},
+                                                               std::optional<Eigen::SparseMatrix<double>>& outS = {},
+                                                               std::optional<Eigen::VectorXd>& outW = {})
     {
         using NodeTreeConfig = NodeTree<Dim>::Config;
         using Inter = MultivariateLinearInterpolation<Dim>;
@@ -273,6 +281,8 @@ namespace SmoothSurfaceReconstruction
                 break;
         }
 
+        invCovMat = std::optional<Eigen::MatrixXd>(SVDmat);
+
         Eigen::JacobiSVD<Eigen::MatrixXd> svd(SVDmat, Eigen::ComputeThinU | Eigen::ComputeThinV);
         Eigen::VectorXd sv = svd.singularValues();
         uint32_t numZeros = 0;
@@ -305,6 +315,8 @@ namespace SmoothSurfaceReconstruction
                 CovX = invSVDmat - invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
                 break;
         }
+
+        covMat = std::optional<Eigen::MatrixXd>(CovX);
         
         Eigen::SparseMatrix<double> A = P.transpose() * covP.inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * S.transpose() * S;
         std::vector<double> unknownsValues(numUnknows);
@@ -357,8 +369,78 @@ namespace SmoothSurfaceReconstruction
         }
 
         outCovariance = std::optional<LinearNodeTree<Dim>>(LinearNodeTree<Dim>(NodeTree<Dim>(quad), std::move(verticesCov)));
+        outP = std::optional<Eigen::SparseMatrix<double>>(std::move(P));
+        outN = std::optional<Eigen::SparseMatrix<double>>(std::move(N));
+        outS = std::optional<Eigen::SparseMatrix<double>>(std::move(S));
+        outW = std::optional<Eigen::MatrixXd>(x);
+        
 
         return std::make_unique<LinearNodeTree<Dim>>(std::move(quad), std::move(verticesValues));
+    }
+
+    template<uint32_t Dim>
+    double evaulatePosteriorFunc(const PointCloud<Dim>& cloud, Config<Dim> config,
+                                Eigen::SparseMatrix<double>& P, Eigen::SparseMatrix<double>& N, Eigen::SparseMatrix<double>& S,
+                                Eigen::VectorXd& w)
+    {
+        EigenSparseMatrix pointsCovMatrix(cloud.size());
+
+        // Position Gaussian
+        Eigen::VectorXd Pw = P * w;
+        double gv = 0.0;
+        double det = 1.0;
+        double power = 1.0;
+
+        for(uint32_t i = 0; i < cloud.getPoints().size(); i++)
+        {
+            gv += Pw(i) * Pw(i) / cloud.variance(i);
+            // det *= cloud.variance(i);
+            // power *= 2.0 * M_PI;
+        }
+
+        // double positionValue = 1.0 / (glm::sqrt(power * det)) * glm::exp(-0.5 * gv);
+        double positionValue = -0.5 * gv;
+
+        // Normals Gaussian
+        Eigen::VectorXd Nw = N * w;
+
+        gv = 0.0;
+        det = 1.0;
+        power = 1.0;
+        double invVarianceGradient = config.gradientWeight  * config.gradientWeight;
+        double varianceGradient = 1.0 / invVarianceGradient;
+        for(uint32_t i = 0; i < cloud.getPoints().size(); i++)
+        {
+            for(uint32_t j = 0; j < 2; j++)
+            {
+                gv += invVarianceGradient * (Nw(2 * i + j) - cloud.normal(i)[j]) * (Nw(2 * i + j) - cloud.normal(i)[j]);
+                // det *= varianceGradient;
+                // power *= 2.0 * M_PI;
+            }
+        }
+
+        // double gradientValue = 1.0 / (glm::sqrt(power * det)) * glm::exp(-0.5 * gv);
+        double gradientValue = -0.5 * gv;
+
+        // Smoothness Gaussian
+        Eigen::VectorXd Sw = S * w;
+
+        gv = 0.0;
+        det = 1.0;
+        power = 1.0;
+        double invSmoothnessGradient = config.smoothWeight  * config.smoothWeight;
+        double varianceSmoothness = 1.0 / invSmoothnessGradient;
+        for(uint32_t i = 0; i < Sw.rows(); i++)
+        {
+            gv += invSmoothnessGradient * Sw(i) * Sw(i);
+            // det *= varianceSmoothness;
+            // power *= 2.0 * M_PI;
+        }
+
+        // double smoothnessValue = 1.0 / (glm::sqrt(power * det)) * glm::exp(-0.5 * gv);
+        double smoothnessValue = -0.5 * gv;
+
+        return glm::exp(positionValue + gradientValue + smoothnessValue);
     }
 
     template<uint32_t Dim>
