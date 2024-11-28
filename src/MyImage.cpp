@@ -78,6 +78,18 @@ void Image::drawFilledCircle(unsigned int x, unsigned int y, float radius, const
 		}
 }
 
+void Image::drawCircle(unsigned int x, unsigned int y, float radius, float thickness, const glm::vec3 &color)
+{
+	thickness = glm::sqrt(2.0f) * thickness;
+	for(unsigned int py=glm::max(0, int(floor(y-radius))); py<=glm::min(int(ceil(y+radius)), int(h-1)); py++)
+		for(unsigned int px=glm::max(0, int(floor(x-radius))); px<=glm::min(int(ceil(x+radius)), int(w-1)); px++)
+		{
+			const float dist = glm::sqrt(static_cast<float>((px - x) * (px - x) + (py - y) * (py - y)));
+			if(glm::abs(dist -  radius) < thickness)
+				(*this)(px, py) = color;
+		}
+}
+
 bool Image::savePNG(const std::string &filename) const
 {
 	unsigned char *data;

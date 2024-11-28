@@ -24,25 +24,11 @@ void drawGradientMaginitudeImage(Image& image, SF& scalarField)
 		glm::vec3(1.0f, 0.0f, 0.0f)
 	};
 
-	float max=0.0f;
-	float mean=0.0f;
-	for(uint32_t i=0; i < image.width(); i++)
-	{
-		for(uint32_t j=0; j < image.height(); j++)
-		{
-			glm::vec2 pos = glm::vec2((static_cast<float>(i)+0.5f) / static_cast<float>(image.width()), 
-									  (static_cast<float>(j)+0.5f) / static_cast<float>(image.height()));
-
-			const glm::vec2 pval = scalarField.evalGrad(pos);
-			const float len = glm::length(pval);
-			max = glm::max(max, glm::abs(len-1.0f));
-			mean += len;
-		}
-	}
-
-	mean = mean / static_cast<float>(image.width() * image.height());
-	std::cout << "Grad magnitude mean " << mean << std::endl;
-	
+	glm::vec2 minCoord = scalarField.getMinCoord();
+	glm::vec2 size = scalarField.getMaxCoord() - scalarField.getMinCoord();
+	glm::vec2 invSize = 1.0f / size;
+	float invSizeMag = glm::length(glm::vec2(image.width(), image.height()) * invSize);
+	float winSizeMag = glm::length(glm::vec2(image.width(), image.height()));	
 	const float maxValue = scalarField.getMaxAbsValue();
 	for(uint32_t i=0; i < image.width(); i++)
 	{
@@ -50,11 +36,12 @@ void drawGradientMaginitudeImage(Image& image, SF& scalarField)
 		{
 			glm::vec2 pos = glm::vec2((static_cast<float>(i)+0.5f) / static_cast<float>(image.width()), 
 									  (static_cast<float>(j)+0.5f) / static_cast<float>(image.height()));
+			pos = minCoord + pos * size;
 
 			// Field color
 			const glm::vec2 pval = scalarField.evalGrad(pos);
 			const float len = glm::abs(glm::length(pval)-1.0f);
-			float val = glm::clamp(len / max, 0.0f, 0.999999f);
+			float val = glm::clamp(len, 0.0f, 0.999999f);
 			val = static_cast<float>(palette.size() - 1) * val;
 			uint32_t cid = glm::floor(val);
 			glm::vec3 bgColor = glm::mix(palette[cid], palette[cid+1], glm::fract(val));
@@ -115,6 +102,8 @@ void drawScalarField(Image& image, SF& scalarField,
 		{
 			point = (point - minCoord) / size;
 			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::vec3(0.35f, 0.35f, 0.35f));
+			// image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
+			// 				 3.0 * glm::sqrt(cloud->get().variance(i)), 5.0f, glm::mix(redPalette[0], redPalette[1], glm::vec3(0.35f, 0.35f, 0.35f)));
 		}
 	}
 
@@ -212,7 +201,10 @@ void drawCovField(Image& image, LinearNodeTree<2>& scalarField,
 		{
 			glm::vec2 point = (cloud->get().point(i) - minCoord) / size;
 			const float colorVal = (cloud->get().variance(i) - min) / (max - min);
-			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::mix(redPalette[0], redPalette[1], colorVal));
+			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
+
+			image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
+							 3.0 * glm::sqrt(cloud->get().variance(i)), 5.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
 		}
 	}
 }
@@ -281,7 +273,9 @@ void drawCollisionField(Image& image, LinearNodeTree<2>& muField, LinearNodeTree
 		{
 			glm::vec2 point = (cloud->get().point(i) - minCoord) / size;
 			const float colorVal = (cloud->get().variance(i) - min) / (max - min);
-			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::mix(redPalette[0], redPalette[1], colorVal));
+			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 3.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
+			image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
+							 image.width() * 3.0 * glm::sqrt(cloud->get().variance(i)) / size[0], 3.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
 		}
 	}
 }
@@ -322,6 +316,42 @@ std::vector<float> read_array_from_txt_file(const std::string& file_path) {
 	}
 
 	return array;
+}
+
+void draw1DField(LinearNodeTree<2>& muField, LinearNodeTree<2>& varField)
+{
+	const std::array<glm::vec3, 2> palette = {
+		glm::vec3(1.0f, 1.0f, 1.0f),
+		glm::vec3(1.0f, 0.0f, 0.0f)
+	};
+
+	glm::vec2 minCoord = muField.getMinCoord();
+	glm::vec2 size = muField.getMaxCoord() - muField.getMinCoord();
+	glm::vec2 invSize = 1.0f / size;
+	int width = 2048;
+	int height = 2048;
+	float invSizeMag = glm::length(glm::vec2(width, height) * invSize);
+	float winSizeMag = glm::length(glm::vec2(width, height));	
+	const float maxValue = muField.getMaxAbsValue();
+	uint32_t i = static_cast<uint32_t>(0.7f * static_cast<float>(width));
+
+	std::vector<float> muVec;
+	std::vector<float> varVec;
+	for(uint32_t j=0; j < height; j++)
+	{
+		glm::vec2 pos = glm::vec2((static_cast<float>(i)+0.5f) / static_cast<float>(width), 
+									(static_cast<float>(j)+0.5f) / static_cast<float>(height));
+		pos = minCoord + pos * size;
+
+		float mu = muField.eval(pos);
+		float var = varField.eval(pos);
+		muVec.push_back(mu);
+		varVec.push_back(var);
+	}
+
+	std::cout << muVec.size() << std::endl;
+	write_array_to_file(muVec, "muVec.bin");
+	write_array_to_file(varVec, "varVec.bin");
 }
 
 int main(int argc, char *argv[])
@@ -397,8 +427,8 @@ int main(int argc, char *argv[])
 
 	SmoothSurfaceReconstruction::Config<2> config = {
 		.posWeight = 1.0f, 
-        .gradientWeight = 1.0f,
-        .smoothWeight = 1.0f,
+        .gradientWeight = 1/0.01f,
+        .smoothWeight = 1/0.5f,
 		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN
 	};
 
@@ -446,98 +476,109 @@ int main(int argc, char *argv[])
 
 	std::cout << "End compute" << std::endl;
 
-	Eigen::LLT<Eigen::MatrixXd> covLLT(covMat.value());
-	Eigen::MatrixXd L = covLLT.matrixL();
-	std::cout << "End compute Cholensky" << std::endl;
+	// Eigen::LLT<Eigen::MatrixXd> covLLT(covMat.value());
+	// Eigen::MatrixXd L = covLLT.matrixL();
+	// std::cout << "End compute Cholensky" << std::endl;
 
-	Eigen::VectorXd basicGaussianValues(vecW.value().rows());
+	// Eigen::VectorXd basicGaussianValues(vecW.value().rows());
 
-	std::random_device rd{};
-    std::mt19937 gen{rd()};
+	// std::random_device rd{};
+    // std::mt19937 gen{rd()};
 
-	std::normal_distribution gaussianSampler;
+	// std::normal_distribution gaussianSampler;
 
-	std::vector<double> sumW(vecW.value().rows(), 0.0);
-	auto vSumW = Eigen::Map<Eigen::VectorXd>(sumW.data(), sumW.size());
+	// std::vector<double> sumW(vecW.value().rows(), 0.0);
+	// auto vSumW = Eigen::Map<Eigen::VectorXd>(sumW.data(), sumW.size());
 
-	std::cout << "Start sampling" << std::endl;
-	const uint32_t numSamples = 2048000;
+	// std::cout << "Start sampling" << std::endl;
+	// // const uint32_t numSamples = 2048000;
 	// const uint32_t numSamples = 20480;
-	double sumWeights = 0.0;
-	std::vector<double> differences;
-	double mg = 0.0;
-	double mp = 0.0;
-	for(uint32_t s = 0; s < numSamples; s++)
-	{
-		for(uint32_t i=0; i < basicGaussianValues.rows(); i++)
-		{
-			basicGaussianValues(i) = gaussianSampler(gen);
-		}
+	// double sumWeights = 0.0;
+	// std::vector<double> differences;
+	// double mg = 0.0;
+	// double mp = 0.0;
+	// double mw = 0.0;
+	// double mw2 = 0.0;
+	// double imw = 0.0;
+	// double imw2 = 0.0;
+	// for(uint32_t s = 0; s < numSamples; s++)
+	// {
+	// 	for(uint32_t i=0; i < basicGaussianValues.rows(); i++)
+	// 	{
+	// 		basicGaussianValues(i) = gaussianSampler(gen);
+	// 	}
 
-		const double rstd = 0.2;
-		const double rinvcov = 1.0 / (rstd * rstd);
-		Eigen::VectorXd newW = vecW.value() + rstd * L * basicGaussianValues;
-		// double g = 1.54203e201 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
-		double g = 5.78e202 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
-		mg += g / static_cast<double>(numSamples);
-		// double p = 1.54203e201 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
-		double p = 10474275180.2 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
-		mp += p / static_cast<double>(numSamples);;
-		double weight = p / g;
-		if(glm::isnan(weight)) continue;
-		auto diff = (newW - vecW.value());
-		for(uint32_t i=0; i < newW.rows(); i++)
-		{
-			vSumW(i) += weight * diff(i) * diff(i);
-		}
-		sumWeights += weight;
-		if(std::any_of(sumW.begin(), sumW.end(), [] (double v) { return glm::isnan(v); }))
-		{
-			std::cout << "nan " << std::endl;
-		}
-		// std::cout << s  << " " << weight << ", "; 
+	// 	const double rstd = 1.0;
+	// 	const double rinvcov = 1.0 / (rstd * rstd);
+	// 	Eigen::VectorXd newW = vecW.value() + rstd * L * basicGaussianValues;
+	// 	double g = 1.54203e201 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
+	// 	// double g = 5.78e202 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
+	// 	mg += g / static_cast<double>(numSamples);
+	// 	double p = 1.54203e207 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
+	// 	// double p = 10474275180.2 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
+	// 	mp += p / static_cast<double>(numSamples);
+	// 	double weight = p / g;
+	// 	mw += weight / static_cast<double>(numSamples);
+	// 	mw2 += weight * weight / static_cast<double>(numSamples);
+	// 	double iweight = g / p;
+	// 	imw += iweight / static_cast<double>(numSamples);
+	// 	imw2 += iweight * iweight / static_cast<double>(numSamples);
+	// 	if(glm::isnan(weight)) continue;
+	// 	auto diff = (newW - vecW.value());
+	// 	for(uint32_t i=0; i < newW.rows(); i++)
+	// 	{
+	// 		vSumW(i) += weight * diff(i) * diff(i);
+	// 	}
+	// 	sumWeights += weight;
+	// 	if(std::any_of(sumW.begin(), sumW.end(), [] (double v) { return glm::isnan(v); }))
+	// 	{
+	// 		std::cout << "nan " << std::endl;
+	// 	}
+	// 	// std::cout << s  << " " << weight << ", "; 
 
-		if(s % 100 == 0)
-		{
-			double d = 0.0;
-			for(uint32_t i=0; i < newW.rows(); i++)
-			{
-				const double v = (vSumW(i) / sumWeights - covMat.value()(i, i));
-				d += v * v;
-			}
-			differences.push_back(d);
+	// 	if(s % 100 == 0)
+	// 	{
+	// 		double d = 0.0;
+	// 		for(uint32_t i=0; i < newW.rows(); i++)
+	// 		{
+	// 			const double v = (vSumW(i) / sumWeights - covMat.value()(i, i));
+	// 			d += v * v;
+	// 		}
+	// 		differences.push_back(d);
 
-			double as = 0.0;
-			for(uint32_t i=0; i < newW.rows(); i++)
-			{
-				const double v = (vSumW(i) - covMat.value()(i, i));
-				as += glm::abs(v) / static_cast<double>(newW.rows());
-			}
+	// 		double as = 0.0;
+	// 		for(uint32_t i=0; i < newW.rows(); i++)
+	// 		{
+	// 			const double v = (vSumW(i) - covMat.value()(i, i));
+	// 			as += glm::abs(v) / static_cast<double>(newW.rows());
+	// 		}
 
-			if(s % 10000 == 0 || d > 1e10)
-			{
-				std::cout << s  << ": " << as << " // " << sumWeights  << " // " << d << std::endl;
-			}
-		}
-	}
+	// 		if(s % 10000 == 0 || d > 1e10)
+	// 		{
+	// 			std::cout << s  << ": " << as << " // " << sumWeights  << " // " << d << std::endl;
+	// 		}
+	// 	}
+	// }
 
-	std::cout << std::endl;
+	// std::cout << std::endl;
 
-	std::cout << mg << " // " << mp << std::endl;
+	// std::cout << mg << " // " << mp << std::endl;
+	// std::cout << mw << " // " << glm::sqrt(mw2 - mw * mw)  << std::endl;
+	// std::cout << imw << " // " << glm::sqrt(imw2 - imw * imw)  << std::endl;
 
-	std::cout << "End sampling" << std::endl;
+	// std::cout << "End sampling" << std::endl;
 
-	vSumW = vSumW / sumWeights;
+	// vSumW = vSumW / sumWeights;
 
-	std::vector<float> fSumW(sumW.size());
-	for(uint32_t i=0; i < fSumW.size(); i++)
-	{
-		fSumW[i] = sumW[i];
-	}
+	// std::vector<float> fSumW(sumW.size());
+	// for(uint32_t i=0; i < fSumW.size(); i++)
+	// {
+	// 	fSumW[i] = sumW[i];
+	// }
 
-	covScalarField = LinearNodeTree<2>(std::move(covScalarField->getNodeTree()), std::move(fSumW));
+	// covScalarField = LinearNodeTree<2>(std::move(covScalarField->getNodeTree()), std::move(fSumW));
 
-	write_array_to_file(differences, "diff2.bin");
+	// write_array_to_file(differences, "diff2.bin");
 
 	// NodeTree<2>::Config quadConfig2 = {
 	// 	.minCoord = NodeTree<2>::vec(0.0f),
@@ -584,10 +625,12 @@ int main(int argc, char *argv[])
 		colimage.savePNG("quadtreePSurface.png");
 	}
 
-	// Image imageG;
-	// imageG.init(2048, 2048);
-	// drawGradientMaginitudeImage(imageG, *scalarField);
-	// imageG.savePNG("quadtreeGrad.png"); 
+	Image imageG;
+	imageG.init(2048, 2048);
+	drawGradientMaginitudeImage(imageG, *scalarField);
+	imageG.savePNG("quadtreeGrad.png"); 
+
+	// draw1DField(*scalarField, *covScalarField);
 
 	return 0;
 }

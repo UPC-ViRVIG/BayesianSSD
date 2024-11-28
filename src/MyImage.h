@@ -22,6 +22,7 @@ public:
 	void drawVerticalLine(unsigned int x, unsigned int y0, unsigned int y1, const glm::vec3 &color);
 	void drawRectangle(unsigned int x0, unsigned int y0, unsigned int x1, unsigned int y1, const glm::vec3 &color);
 	void drawFilledCircle(unsigned int x, unsigned int y, float radius, const glm::vec3 &color);
+	void drawCircle(unsigned int x, unsigned int y, float radius, float thickness, const glm::vec3 &color);
 	
 	bool savePNG(const std::string &filename) const;
 	
