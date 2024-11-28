@@ -21,7 +21,7 @@ void write_array_to_file(const std::vector<T>& arr, const std::string& filename)
   }
 
   // Write the size of the array as the first element
-  size_t size = arr.size();
+  uint32_t size = arr.size();
   file.write(reinterpret_cast<const char*>(&size), sizeof(size));
 
   // Write each element of the array
@@ -179,6 +179,7 @@ namespace SmoothSurfaceReconstruction
         EigenSparseMatrix smoothMatrix(numUnknows);
         const unsigned int numNodesAtMaxDepth = 1 << quad.getMaxDepth();
         const vec nodeSize = (quad.getMaxCoord() - quad.getMinCoord()) / static_cast<float>(numNodesAtMaxDepth) - vec(1e-6);
+        const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
         for(uint32_t i = 0; i < quad.getNumVertices(); i++)
         {
             if(vertIdToUnknownVertId[i] == std::numeric_limits<uint32_t>::max())
@@ -219,7 +220,7 @@ namespace SmoothSurfaceReconstruction
                         {
                             if(glm::abs(weights[j]) > 1e-8)
                             {
-                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], 0.5f * weights[j]);
+                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], invSizeSq * weights[j]);
                             }
                         }
                     }
@@ -238,7 +239,7 @@ namespace SmoothSurfaceReconstruction
                         {
                             if(glm::abs(weights[j]) > 1e-8)
                             {
-                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], w * weights[j]);
+                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], invSizeSq * w * weights[j]);
                             }
                         }
                     }
@@ -248,7 +249,7 @@ namespace SmoothSurfaceReconstruction
 
 			if(numValidSides > 0) 
             {
-                setUnkownValue(smoothMatrix, i, -static_cast<float>(numValidSides));
+                setUnkownValue(smoothMatrix, i, -2.0f * invSizeSq * static_cast<float>(numValidSides));
                 smoothMatrix.endEquation();
             }
         }
@@ -260,7 +261,7 @@ namespace SmoothSurfaceReconstruction
         float invVarSmoothing = config.smoothWeight * config.smoothWeight;
         float invVarGradient = config.gradientWeight * config.gradientWeight;
         
-        Eigen::VectorXd b = N.transpose() * gradientVector.getVector();
+        Eigen::VectorXd b = N.transpose() * invVarGradient * gradientVector.getVector();
         Eigen::MatrixXd mP = Eigen::MatrixXd(P);
         Eigen::MatrixXd mS = Eigen::MatrixXd(S);
         Eigen::MatrixXd mN = Eigen::MatrixXd(N);
