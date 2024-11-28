@@ -1,27 +1,29 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 def read_array_from_file(filename, dtype=float):
-  """
-  Reads an array of the specified data type from a binary file.
+    """
+    Reads an array of the specified data type from a binary file.
 
-  Args:
-      filename (str): The name of the file to read from.
-      dtype (dtype, optional): The data type of the elements in the array.
-          Defaults to float.
+    Args:
+        filename (str): The name of the file to read from.
+        dtype (dtype, optional): The data type of the elements in the array.
+            Defaults to float.
 
-  Returns:
-      numpy.ndarray: The array read from the file.
-  """
+    Returns:
+        numpy.ndarray: The array read from the file.
+    """
 
-  with open(filename, "rb") as file:
-    # Read the size of the array
-    size = np.fromfile(file, dtype=int, count=1)[0]
+    with open(filename, "rb") as file:
+        # Read the size of the array
+        size = np.fromfile(file, dtype=int, count=1)[0]
 
-    # Read the array elements
-    data = np.fromfile(file, dtype=dtype, count=size)
+        # Read the array elements
+        data = np.fromfile(file, dtype=dtype, count=size)
 
-  return data
+    return data
+
 
 P = 0.9
 
