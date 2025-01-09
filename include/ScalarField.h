@@ -94,6 +94,13 @@ public:
 		return absMax;
 	}
 
+	float getMinAbsValue() const
+	{
+		float absMin = 0.0f;
+		for(float v : vValues) absMin = glm::min(absMin, glm::abs(v));
+		return absMin;
+	}
+
 	float getMaxValue() const
 	{
 		float max = -INFINITY;
