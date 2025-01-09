@@ -63,11 +63,30 @@ if(NOT cereal_lib_POPULATED)
     add_subdirectory(${cereal_lib_SOURCE_DIR} ${cereal_lib_BINARY_DIR})
 endif()
 
+# Nanoflann
+FetchContent_Declare(nanoflann_lib
+GIT_REPOSITORY https://github.com/jlblancoc/nanoflann.git
+GIT_TAG f1e47f0dbae72c11b008fd0d5b1191d9ba1f29bb # 1.5.0
+)
+
+FetchContent_GetProperties(nanoflann_lib)
+if(NOT nanoflann_lib_POPULATED)
+    FetchContent_Populate(nanoflann_lib)
+    add_library(nanoflann INTERFACE)
+    target_include_directories(nanoflann INTERFACE ${nanoflann_lib_SOURCE_DIR}/include)
+endif()
 
 file(GLOB SOURCE_FILES ./src/*.cpp)
-add_executable(${PROJECT_NAME} src/tools/2D/main.cpp ${SOURCE_FILES})
-target_include_directories(${PROJECT_NAME} PRIVATE src)
-target_include_directories(${PROJECT_NAME} PUBLIC include)
-target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm happly cereal::cereal)
-target_compile_options(${PROJECT_NAME} PRIVATE "/bigobj")
-# target_link_libraries(${PROJECT_NAME} PUBLIC eigen glm cereal::cereal)
+add_executable(recon_3d src/tools/3D/main.cpp ${SOURCE_FILES})
+target_include_directories(recon_3d PRIVATE src)
+target_include_directories(recon_3d PUBLIC include)
+target_link_libraries(recon_3d PUBLIC eigen glm happly cereal::cereal nanoflann)
+target_compile_options(recon_3d PRIVATE "/bigobj")
+
+add_executable(recon_2d src/tools/2D/main.cpp ${SOURCE_FILES})
+target_include_directories(recon_2d PRIVATE src)
+target_include_directories(recon_2d PUBLIC include)
+target_link_libraries(recon_2d PUBLIC eigen glm happly cereal::cereal nanoflann)
+target_compile_options(recon_2d PRIVATE "/bigobj")
+
+add_subdirectory(viewer)

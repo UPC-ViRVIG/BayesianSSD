@@ -5,6 +5,7 @@
 #include <numbers>
 #include <random>
 #include "SmoothSurfaceReconstruction.h"
+#include "GPReconstruction.h"
 #include "PoissonReconstruction.h"
 #include "EigenSquareSolver.h"
 #include "MyImage.h"
@@ -78,7 +79,7 @@ void drawScalarField(Image& image, SF& scalarField,
 		glm::vec3(1.0f, 0.5f, 0.0f), 
 		glm::vec3(1.0f, 0.0f, 0.0f)
 	};
-
+	
 	const float maxValue = scalarField.getMaxAbsValue();
 	ScalarFieldRender::renderScalarField(scalarField, image, [maxValue](float val) { return 0.5f * (1.0f + val / maxValue); }, sdfPalette,
 										 1.0f, 0.0f, 1.0f, 
@@ -172,10 +173,10 @@ void drawCovField(Image& image, LinearNodeTree<2>& scalarField,
 		glm::vec3(1.0f, 0.0f, 0.0f)
 	};
 
-	auto op = [](float val) { return glm::sqrt(val); };
+	auto op = [](float val) { return glm::sqrt(glm::abs(val)); };
 
-	float maxValue = op(scalarField.getMaxValue());
-	const float minValue = op(scalarField.getMinValue());
+	float maxValue = op(scalarField.getMaxAbsValue());
+	const float minValue = op(scalarField.getMinAbsValue());
 	std::cout << "min " << minValue << " // max " << maxValue << std::endl;
 	maxValue = 0.99 * maxValue;
 	ScalarFieldRender::renderScalarField(scalarField, image, 
@@ -236,7 +237,7 @@ void drawCollisionField(Image& image, LinearNodeTree<2>& muField, LinearNodeTree
 	auto op = [&](glm::vec2 pos) 
 	{
 		float mu = muField.eval(pos);
-		float std = glm::sqrt(varField.eval(pos));
+		float std = glm::sqrt(glm::abs(varField.eval(pos)));
 		if(printDensity)
 		{
 			return 1.0f / (glm::sqrt(2.0f * static_cast<float>(std::numbers::pi)) * std) * glm::exp(-0.5f * mu * mu / (std * std));
@@ -392,14 +393,13 @@ int main(int argc, char *argv[])
     // Add margin
     maxSize = 1.2f * maxSize;
 
-	const uint32_t maxDepth = 5;
+	const uint32_t maxDepth = 6;
 	NodeTree<2>::Config quadConfig = {
 		// .minCoord = NodeTree<2>::vec(0.0f),
 		// .maxCoord = NodeTree<2>::vec(1.0f),
 		.minCoord = center - glm::vec2(0.5f * maxSize),
 		.maxCoord = center + glm::vec2(0.5f * maxSize),
-		.pointFilterMaxDistance = 10000.0f * maxSize / static_cast<float>(1 << maxDepth),
-		//.pointFilterMaxDistance = 0.0f,
+		.pointFilterMaxDistance = 1.23f * maxSize / static_cast<float>(1 << maxDepth),
 		.constraintNeighbourNodes = true,
 		.maxDepth = maxDepth
 	};
@@ -427,9 +427,10 @@ int main(int argc, char *argv[])
 
 	SmoothSurfaceReconstruction::Config<2> config = {
 		.posWeight = 1.0f, 
-        .gradientWeight = 1/0.01f,
-        .smoothWeight = 1/0.5f,
-		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN
+        .gradientWeight = 1/0.5f,
+        .smoothWeight = 1/1.0f,
+		.algorithm = SmoothSurfaceReconstruction::Algorithm::VAR,
+		.computeVariance = true
 	};
 
 	// PoissonReconstruction::Config<2> config = {};
@@ -454,6 +455,9 @@ int main(int argc, char *argv[])
 
 	std::unique_ptr<LinearNodeTree<2>> scalarField = 
 		SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config, covScalarField, invCovMat, covMat, matP, matN, matS, vecW);
+
+	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
+	// 	GPReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, covScalarField);
 
 
 	// Eigen::JacobiSVD<Eigen::MatrixXd> svd(covMat.value(), Eigen::ComputeThinU | Eigen::ComputeThinV);

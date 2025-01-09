@@ -167,7 +167,7 @@ public:
 		BoundingBox mBox = {nodeTree.getMinCoord(), nodeTree.getMaxCoord()};
 		int mStartGridSize = 1;
 		uint32_t mMaxDepth = nodeTree.getMaxDepth();
-		bool mSdfOnlyAySurface = false;
+		bool mSdfOnlyAtSurface = false;
 		float mValueRange = getMaxAbsValue();
 		float mMinBorderValue = 0.0f;
 		std::vector<OctreeNode> mOctreeData(1);
@@ -201,7 +201,7 @@ public:
 
 		processNode(octree[0], 0);
 		archive(format);
-        archive(mBox, mStartGridSize, mMaxDepth, mSdfOnlyAySurface, mValueRange, mMinBorderValue, mOctreeData);
+        archive(mBox, mStartGridSize, mMaxDepth, mSdfOnlyAtSurface, mValueRange, mMinBorderValue, mOctreeData);
     }
 
 private:
