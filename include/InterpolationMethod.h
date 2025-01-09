@@ -23,6 +23,24 @@ struct MultivariateLinearInterpolation
         }
     }
 
+    static void evalGrad(vec np, vec nodeSize, std::array<std::array<float, NumControlPoints>, Dim>& outWeights)
+    {
+        for(uint32_t d=0; d < Dim; d++)
+        {
+            for(uint32_t i=0; i < NumControlPoints; i++)
+            {
+                outWeights[d][i] = 1.0f;
+                for(uint32_t j=0; j < Dim; j++)
+                {
+                    if(d == j) outWeights[d][i] *= (i & (1 << j)) ? 1.0f : -1.0f;
+                    else outWeights[d][i] *= (i & (1 << j)) ? np[j] : (1.0f - np[j]);
+                }
+
+                outWeights[d][i] *= 1.0f / nodeSize[d];
+            }
+        }
+    }
+
     static void evalGrad(vec np, std::array<std::array<float, NumControlPoints>, Dim>& outWeights)
     {
         for(uint32_t d=0; d < Dim; d++)

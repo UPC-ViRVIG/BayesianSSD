@@ -9,6 +9,7 @@
 #include "EigenSparseMatrix.h"
 #include "EigenSolver.h"
 #include <Eigen/Eigenvalues>
+#include "Timer.h"
 
 #define M_PI 3.14159265359
 
@@ -48,22 +49,39 @@ namespace SmoothSurfaceReconstruction
         float gradientWeight;
         float smoothWeight;
         Algorithm algorithm;
+        bool computeVariance;
     };
 
     template<uint32_t Dim>
     std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
-                                                               std::optional<LinearNodeTree<Dim>>& outCovariance = {},
-                                                               std::optional<Eigen::MatrixXd>& invCovMat = {},
-                                                               std::optional<Eigen::MatrixXd>& covMat = {},
-                                                               std::optional<Eigen::SparseMatrix<double>>& outP = {},
-                                                               std::optional<Eigen::SparseMatrix<double>>& outN = {},
-                                                               std::optional<Eigen::SparseMatrix<double>>& outS = {},
-                                                               std::optional<Eigen::VectorXd>& outW = {})
+                                                               std::optional<LinearNodeTree<Dim>>& outCovariance)
+    {
+        std::optional<Eigen::MatrixXd> invCovMat;
+        std::optional<Eigen::MatrixXd> covMat;
+        std::optional<Eigen::SparseMatrix<double>> outP;
+        std::optional<Eigen::SparseMatrix<double>> outN;
+        std::optional<Eigen::SparseMatrix<double>> outS;
+        std::optional<Eigen::VectorXd> outW;
+        return computeLinearNodeTree(std::move(quad), cloud, config, outCovariance, invCovMat, covMat, outP, outN, outS, outW);
+    }
+
+    template<uint32_t Dim>
+    std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
+                                                               std::optional<LinearNodeTree<Dim>>& outCovariance,
+                                                               std::optional<Eigen::MatrixXd>& invCovMat,
+                                                               std::optional<Eigen::MatrixXd>& covMat,
+                                                               std::optional<Eigen::SparseMatrix<double>>& outP,
+                                                               std::optional<Eigen::SparseMatrix<double>>& outN,
+                                                               std::optional<Eigen::SparseMatrix<double>>& outS,
+                                                               std::optional<Eigen::VectorXd>& outW)
     {
         using NodeTreeConfig = NodeTree<Dim>::Config;
         using Inter = MultivariateLinearInterpolation<Dim>;
         using Node = NodeTree<Dim>::Node;
         using vec = ScalarField<Dim>::vec;
+
+        Timer timer;
+        timer.start();
 
         // Get constraints
         struct ConstrainedUnknown
@@ -149,6 +167,7 @@ namespace SmoothSurfaceReconstruction
             if(!node) continue;
             std::array<float, Inter::NumControlPoints> weights;
             const vec nnPos = node->transformToLocalCoord(nPos);
+            const vec nodeSize = node->maxCoord - node->minCoord;
             Inter::eval(nnPos, weights);
 
             for(uint32_t i = 0; i < Inter::NumControlPoints; i++)
@@ -160,7 +179,7 @@ namespace SmoothSurfaceReconstruction
 
             vec nNorm = glm::normalize(cloud.normal(i));
             std::array<std::array<float, Inter::NumControlPoints>, Dim> gradWeights;
-            Inter::evalGrad(nnPos, gradWeights);
+            Inter::evalGrad(nnPos, nodeSize, gradWeights);
 
             for(uint32_t j=0; j < Dim; j++)
             {
@@ -260,70 +279,79 @@ namespace SmoothSurfaceReconstruction
         Eigen::SparseMatrix<double> S = smoothMatrix.getMatrix();
         float invVarSmoothing = config.smoothWeight * config.smoothWeight;
         float invVarGradient = config.gradientWeight * config.gradientWeight;
-        
         Eigen::VectorXd b = N.transpose() * invVarGradient * gradientVector.getVector();
-        Eigen::MatrixXd mP = Eigen::MatrixXd(P);
-        Eigen::MatrixXd mS = Eigen::MatrixXd(S);
-        Eigen::MatrixXd mN = Eigen::MatrixXd(N);
-        Eigen::MatrixXd SVDmat;
 
+        std::cout << "Time setting the problem: " << timer.getElapsedSeconds() << std::endl;
 
-        switch(config.algorithm)
+        if(config.computeVariance)
         {
-            case VAR:
-                SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
-                break;
-            case BAYESIAN:
-                SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
-                break;
-            case GP:
-                // SVDmat = invVarSmoothing * mS.transpose() * mS;
-                SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
-                break;
-        }
+            timer.start();
 
-        invCovMat = std::optional<Eigen::MatrixXd>(SVDmat);
+            Eigen::MatrixXd mP = Eigen::MatrixXd(P);
+            Eigen::MatrixXd mS = Eigen::MatrixXd(S);
+            Eigen::MatrixXd mN = Eigen::MatrixXd(N);
+            Eigen::MatrixXd SVDmat;
 
-        Eigen::JacobiSVD<Eigen::MatrixXd> svd(SVDmat, Eigen::ComputeThinU | Eigen::ComputeThinV);
-        Eigen::VectorXd sv = svd.singularValues();
-        uint32_t numZeros = 0;
-        for(uint32_t i=0; i < sv.size(); i++)
-        {
-            if(sv(i) > 1e-9)
+            switch(config.algorithm)
             {
-                sv(i) = 1.0f / sv(i);
+                case VAR:
+                    SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
+                    break;
+                case BAYESIAN:
+                    SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
+                    break;
+                case GP:
+                    // SVDmat = invVarSmoothing * mS.transpose() * mS;
+                    SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
+                    break;
             }
-            else
+
+            invCovMat = std::optional<Eigen::MatrixXd>(SVDmat);
+
+            Eigen::JacobiSVD<Eigen::MatrixXd> svd(SVDmat, Eigen::ComputeThinU | Eigen::ComputeThinV);
+            Eigen::VectorXd sv = svd.singularValues();
+            uint32_t numZeros = 0;
+            for(uint32_t i=0; i < sv.size(); i++)
             {
-                numZeros++;
-                sv(i) = 0.0f;
+                if(sv(i) > 1e-9)
+                {
+                    sv(i) = 1.0f / sv(i);
+                }
+                else
+                {
+                    numZeros++;
+                    sv(i) = 0.0f;
+                }
             }
+            Eigen::MatrixXd invSVDmat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
+
+            Eigen::MatrixXd CovX;
+            switch(config.algorithm)
+            {
+                case VAR:
+                    CovX = invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
+                    break;
+                case BAYESIAN:
+                    CovX = invSVDmat;
+                    break;
+                case GP:
+                    CovX = invSVDmat - invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
+                    break;
+            }
+            covMat = std::optional<Eigen::MatrixXd>(CovX);
+
+            std::cout << "Time computing covariance: " << timer.getElapsedSeconds() << std::endl;
         }
-        std::cout << "num zeros " << numZeros << std::endl;
-        Eigen::MatrixXd invSVDmat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
-
-        Eigen::MatrixXd CovX;
-
-        switch(config.algorithm)
-        {
-            case VAR:
-                CovX = invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
-                break;
-            case BAYESIAN:
-                CovX = invSVDmat;
-                break;
-            case GP:
-                CovX = invSVDmat - invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
-                break;
-        }
-
-        covMat = std::optional<Eigen::MatrixXd>(CovX);
         
+        timer.start();
+
         Eigen::SparseMatrix<double> A = P.transpose() * covP.inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * S.transpose() * S;
         std::vector<double> unknownsValues(numUnknows);
         auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
 
         EigenSolver::BiCGSTAB::solve(A, b, x);
+
+        std::cout << "Time solving problem: " << timer.getElapsedSeconds() << std::endl;
 
         std::function<float(uint32_t)> getVertValue;
         getVertValue = [&](uint32_t vertId) -> float
@@ -357,24 +385,30 @@ namespace SmoothSurfaceReconstruction
             else
             {
                 const uint32_t id = vertIdToUnknownVertId[vertId];
-                return static_cast<float>(CovX(id, id));
+                return static_cast<float>(covMat.value()(id, id));
             }
         };
         
-        std::vector<float> verticesValues(quad.getNumVertices());
-        std::vector<float> verticesCov(quad.getNumVertices());
+        std::vector<float> verticesValues(quad.getNumVertices());        
         for(uint32_t i=0; i < quad.getNumVertices(); i++)
         {
             verticesValues[i] = getVertValue(i);
-            verticesCov[i] = getVertCov(i);
         }
 
-        outCovariance = std::optional<LinearNodeTree<Dim>>(LinearNodeTree<Dim>(NodeTree<Dim>(quad), std::move(verticesCov)));
+        if(config.computeVariance)
+        {
+            std::vector<float> verticesCov(config.computeVariance ? quad.getNumVertices() : 0);
+            for(uint32_t i=0; i < quad.getNumVertices(); i++)
+            {
+                verticesCov[i] = getVertCov(i);
+            }
+            outCovariance = std::optional<LinearNodeTree<Dim>>(LinearNodeTree<Dim>(NodeTree<Dim>(quad), std::move(verticesCov)));
+        }
+
         outP = std::optional<Eigen::SparseMatrix<double>>(std::move(P));
         outN = std::optional<Eigen::SparseMatrix<double>>(std::move(N));
         outS = std::optional<Eigen::SparseMatrix<double>>(std::move(S));
         outW = std::optional<Eigen::MatrixXd>(x);
-        
 
         return std::make_unique<LinearNodeTree<Dim>>(std::move(quad), std::move(verticesValues));
     }
