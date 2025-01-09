@@ -9,6 +9,7 @@
 #include <stack>
 #include <optional>
 #include <cstdlib>
+#include <bitset>
 #include "Vector.h"
 #include "PointCloud.h"
 
@@ -421,37 +422,60 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
 
     createNode(root, cloud.getPoints());
 
-    auto needSubdivision = [&](const NodeInfo& node, std::array<NodeInfo, 4>& outNodes, uint32_t& numNeighbours)
+    constexpr uint32_t nNeighbours = 18;
+
+    auto needSubdivision = [&](const NodeInfo& node, std::array<NodeInfo, nNeighbours>& outNodes, uint32_t& numNeighbours)
     {
         const vec center = 0.5f * (node.minCoord + node.maxCoord);
         const vec size = node.maxCoord - node.minCoord;
         numNeighbours = 0;
         bool subdivide = false;
         const uint32_t workBits = (1 << Dim) - 1;
-        // const uint32_t numThreeStateOptions = (Dim == 1) ? 0 : 1 << (Dim - 2);
-        // for(uint32_t i=0; i < Dim; i++)
-        // {
-        //     for(uint32_t j=0; j < numThreeStateOptions; j++)
-        //     {
-        //         vec newPos = center;
 
-
-        //     }
-        // }
-        for(float sign : {-1.0f, 1.0f})
+        for(uint32_t m=1; m < NumVerticesPerNode; m++)
         {
+            const uint32_t mask = (~m) & workBits;
+            if(mask == 0) continue; // No zero bit
+            // Change sign
+            uint32_t numBits = 0;
+            std::array<uint32_t, Dim> childrenBits;
             for(uint32_t i=0; i < Dim; i++)
             {
-                // Search all neighbours in that side
-                const uint32_t mask = (~(1 << i)) & workBits;
-                const uint32_t defaultValue = (sign > 0.0f ? 0 : 1) << i;
+                if(m & (1 << i)) childrenBits[numBits++] = i;
+            }
+
+            const uint32_t numSignSol = 1 << numBits;
+
+            for(uint32_t s=0; s < numSignSol; s++)
+            {
                 vec newPos = center;
-                newPos[i] += sign * size[i];
+                uint32_t defaultValue = 0;
+                for(uint32_t i = 0; i < numBits; i++) 
+                {
+                    const uint32_t bs = (s >> i) & 0b01;
+                    defaultValue = defaultValue | (bs << childrenBits[i]);
+                    newPos[childrenBits[i]] += ((bs > 0) ? -1.0f : 1.0f) * size[i];
+                }
                 std::optional<NodeInfo> nn;
                 subdivide = getNeighbourNode(newPos, nn, node.depth, mask, defaultValue) || subdivide;
                 if(nn) outNodes[numNeighbours++] = *nn;
             }
+
         }
+        // for(float sign : {-1.0f, 1.0f})
+        // {
+        //     for(uint32_t i=0; i < Dim; i++)
+        //     {
+        //         // Search all neighbours in that side
+        //         const uint32_t mask = (~(1 << i)) & workBits;
+        //         const uint32_t defaultValue = (sign > 0.0f ? 0 : 1) << i;
+        //         vec newPos = center;
+        //         newPos[i] += sign * size[i];
+        //         std::optional<NodeInfo> nn;
+        //         subdivide = getNeighbourNode(newPos, nn, node.depth, mask, defaultValue) || subdivide;
+        //         if(nn) outNodes[numNeighbours++] = *nn;
+        //     }
+        // }
 
         return subdivide;
     };
@@ -460,7 +484,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
     if(config.constraintNeighbourNodes)
     {
         uint32_t numNeighbours = 0;
-        std::array<NodeInfo, 4> neighbourNodes;
+        std::array<NodeInfo, nNeighbours> neighbourNodes;
         while(nodesToCheck.size() > 0)
         {
             NodeInfo node = nodesToCheck.back();
