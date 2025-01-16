@@ -69,7 +69,8 @@ public:
 		}
 
 		std::array<std::array<float, Inter::NumControlPoints>, Dim> weigths;
-		Inter::evalGrad(node->transformToLocalCoord(point), weigths);
+		const vec nodeSize = node->maxCoord - node->minCoord;
+		Inter::evalGrad(node->transformToLocalCoord(point), nodeSize, weigths);
 		vec res;
 		for(uint32_t d = 0; d < Dim; d++)
 		{

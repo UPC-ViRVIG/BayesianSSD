@@ -8,6 +8,7 @@
 #include "InterpolationMethod.h"
 #include "EigenSparseMatrix.h"
 #include "EigenSolver.h"
+#include "EigenDecompositionLaplacian.h"
 #include <Eigen/Eigenvalues>
 #include "Timer.h"
 
@@ -64,7 +65,7 @@ namespace SmoothSurfaceReconstruction
         std::optional<Eigen::VectorXd> outW;
         return computeLinearNodeTree(std::move(quad), cloud, config, outCovariance, invCovMat, covMat, outP, outN, outS, outW);
     }
-
+ 
     template<uint32_t Dim>
     std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
                                                                std::optional<LinearNodeTree<Dim>>& outCovariance,
@@ -204,9 +205,9 @@ namespace SmoothSurfaceReconstruction
             if(vertIdToUnknownVertId[i] == std::numeric_limits<uint32_t>::max())
                 continue;
 
-            uint32_t numValidSides = 0;
             for(uint32_t d=0; d < Dim; d++)
             {
+                uint32_t numValidSides = 0;
                 vec side;
                 for(uint32_t j=0; j < Dim; j++)
                     side[j] = (d == j) ? 1.0f : 0.0f;
@@ -244,6 +245,11 @@ namespace SmoothSurfaceReconstruction
                         }
                     }
                     numValidSides++;
+                    if(numValidSides > 0) 
+                    {
+                        setUnkownValue(smoothMatrix, i, -2.0f * invSizeSq * static_cast<float>(numValidSides));
+                        smoothMatrix.endEquation();
+                    }
                 }
                 else if(extrapolateLaplacian)
                 {
@@ -265,21 +271,35 @@ namespace SmoothSurfaceReconstruction
                     numValidSides++;
                 }
 			}
+        }
 
-			if(numValidSides > 0) 
+        for(const Node& n : quad)
+        {
+            std::array<std::array<float, Inter::NumControlPoints>, Inter::NumSecondGrad> weights;
+            Inter::evalSecondGradInteg(n.maxCoord - n.minCoord, weights);
+            uint32_t d = 0;
+            for(const auto& w : weights)
             {
-                setUnkownValue(smoothMatrix, i, -2.0f * invSizeSq * static_cast<float>(numValidSides));
+                for(uint32_t i=0; i < Inter::NumControlPoints; i++)
+                {
+                    setUnkownValue(smoothMatrix, n.controlPointsIdx[i], weights[d][i]);
+                }
                 smoothMatrix.endEquation();
+                d++;
             }
         }
 
         Eigen::SparseMatrix<double> P = pointsMatrix.getMatrix();
-        Eigen::MatrixXd covP = Eigen::MatrixXd(pointsCovMatrix.getMatrix());
+        Eigen::SparseMatrix<double> covP = pointsCovMatrix.getMatrix();
         Eigen::SparseMatrix<double> N = gradientMatrix.getMatrix();
         Eigen::SparseMatrix<double> S = smoothMatrix.getMatrix();
+        // S = S * S; // Bilaplacian
         float invVarSmoothing = config.smoothWeight * config.smoothWeight;
+        invVarSmoothing = invVarSmoothing * invVarSmoothing;
         float invVarGradient = config.gradientWeight * config.gradientWeight;
         Eigen::VectorXd b = N.transpose() * invVarGradient * gradientVector.getVector();
+        Eigen::SparseMatrix<double> A = P.transpose() * covP.diagonal().asDiagonal().inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * S.transpose() * S;
+        // Eigen::SparseMatrix<double> A = P.transpose() * covP.diagonal().asDiagonal().inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * (S.transpose() * S);
 
         std::cout << "Time setting the problem: " << timer.getElapsedSeconds() << std::endl;
 
@@ -287,28 +307,20 @@ namespace SmoothSurfaceReconstruction
         {
             timer.start();
 
-            Eigen::MatrixXd mP = Eigen::MatrixXd(P);
-            Eigen::MatrixXd mS = Eigen::MatrixXd(S);
-            Eigen::MatrixXd mN = Eigen::MatrixXd(N);
-            Eigen::MatrixXd SVDmat;
+            // // TODO: only for grids
+            // std::vector<glm::ivec3> gridPoints(numUnknows);
+            // vec bbSize = quad.getMaxCoord() - quad.getMinCoord();
+            // for(uint32_t i=0; i < numUnknows; i++)
+            // {
+            //     gridPoints[i] = glm::round(static_cast<float>(numNodesAtMaxDepth) * (quad.getVertices()[i] - quad.getMinCoord()) / bbSize);
+            // }
+            // Eigen::MatrixXd conv = EigenDecompositionLaplacian::getMatrix(glm::ivec3(numNodesAtMaxDepth), gridPoints, 512);
 
-            switch(config.algorithm)
-            {
-                case VAR:
-                    SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
-                    break;
-                case BAYESIAN:
-                    SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
-                    break;
-                case GP:
-                    // SVDmat = invVarSmoothing * mS.transpose() * mS;
-                    SVDmat = mP.transpose() * covP.inverse() * mP + invVarSmoothing * mS.transpose() * mS + invVarGradient * mN.transpose() * mN;
-                    break;
-            }
+            // invCovMat = std::optional<Eigen::MatrixXd>(SVDmat);
 
-            invCovMat = std::optional<Eigen::MatrixXd>(SVDmat);
-
+            Eigen::MatrixXd SVDmat(A);
             Eigen::JacobiSVD<Eigen::MatrixXd> svd(SVDmat, Eigen::ComputeThinU | Eigen::ComputeThinV);
+            // Eigen::JacobiSVD<Eigen::MatrixXd> svd(conv.transpose() * SVDmat * conv, Eigen::ComputeThinU | Eigen::ComputeThinV);
             Eigen::VectorXd sv = svd.singularValues();
             uint32_t numZeros = 0;
             for(uint32_t i=0; i < sv.size(); i++)
@@ -324,34 +336,57 @@ namespace SmoothSurfaceReconstruction
                 }
             }
             Eigen::MatrixXd invSVDmat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
+            // Eigen::MatrixXd invSVDmat = conv * svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint() * conv.transpose();
 
             Eigen::MatrixXd CovX;
             switch(config.algorithm)
             {
                 case VAR:
-                    CovX = invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
+                    {
+                        auto sA = P.transpose() * covP.diagonal().asDiagonal().inverse() * P + invVarGradient * N.transpose() * N;
+                        CovX = invSVDmat * sA * invSVDmat.transpose();
+                    }
                     break;
                 case BAYESIAN:
                     CovX = invSVDmat;
                     break;
                 case GP:
-                    CovX = invSVDmat - invSVDmat * mP.transpose() * covP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
+                    // CovX = invSVDmat - invSVDmat * mP.transpose() * mCovP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
                     break;
             }
-            covMat = std::optional<Eigen::MatrixXd>(CovX);
+            // covMat = std::optional<Eigen::MatrixXd>(CovX);
 
             std::cout << "Time computing covariance: " << timer.getElapsedSeconds() << std::endl;
         }
         
+        std::vector<double> unknownsValues(numUnknows, 1.0f);
+        { // Test mul performance
+            auto a = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
+            // Eigen::VectorXd a = Eigen::VectorXd::Ones(numUnknows);
+            Eigen::VectorXd b = Eigen::VectorXd::Ones(numUnknows);
+            const uint32_t numIt = 1000; 
+            timer.start();
+            for(uint32_t i=0; i < 1000; i++)
+            {
+                b = A * a;
+            }
+            std::cout << "Mul time: " << (timer.getElapsedSeconds() / static_cast<float>(numIt)) << std::endl;
+        }
+
+        std::cout << "Matrix: " << A.rows() << " x " << A.cols() << std::endl;
+        std::cout << "Sparsity: " << A.nonZeros() << " / " << A.cols() * A.rows() << std::endl;
+        
         timer.start();
 
-        Eigen::SparseMatrix<double> A = P.transpose() * covP.inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * S.transpose() * S;
-        std::vector<double> unknownsValues(numUnknows);
+        unknownsValues = std::vector<double>(numUnknows, 0.0f);
         auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
 
-        EigenSolver::BiCGSTAB::solve(A, b, x);
+        // EigenSolver::BiCGSTAB::solve(A, b, x);
+        EigenSolver::CG::solve(A, b, x);
 
         std::cout << "Time solving problem: " << timer.getElapsedSeconds() << std::endl;
+
+        timer.start();
 
         std::function<float(uint32_t)> getVertValue;
         getVertValue = [&](uint32_t vertId) -> float
@@ -405,10 +440,12 @@ namespace SmoothSurfaceReconstruction
             outCovariance = std::optional<LinearNodeTree<Dim>>(LinearNodeTree<Dim>(NodeTree<Dim>(quad), std::move(verticesCov)));
         }
 
-        outP = std::optional<Eigen::SparseMatrix<double>>(std::move(P));
-        outN = std::optional<Eigen::SparseMatrix<double>>(std::move(N));
-        outS = std::optional<Eigen::SparseMatrix<double>>(std::move(S));
-        outW = std::optional<Eigen::MatrixXd>(x);
+        std::cout << "Create node linear tree: " << timer.getElapsedSeconds() << std::endl;
+
+        // outP = std::optional<Eigen::SparseMatrix<double>>(std::move(P));
+        // outN = std::optional<Eigen::SparseMatrix<double>>(std::move(N));
+        // outS = std::optional<Eigen::SparseMatrix<double>>(std::move(S));
+        // outW = std::optional<Eigen::MatrixXd>(x);
 
         return std::make_unique<LinearNodeTree<Dim>>(std::move(quad), std::move(verticesValues));
     }

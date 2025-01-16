@@ -56,7 +56,56 @@ struct MultivariateLinearInterpolation
             }
         }
     }
+
+    static constexpr uint32_t NumSecondGrad = (Dim == 2) ? 1 : 3;
+    static void evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) {}
 };
+
+template<>
+static inline void MultivariateLinearInterpolation<2>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
+{
+    const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
+    outWeights[0][0] = invSizeSq;
+    outWeights[0][1] = -invSizeSq;
+    outWeights[0][2] = -invSizeSq;
+    outWeights[0][3] = invSizeSq;
+}
+
+template<>
+static inline void MultivariateLinearInterpolation<3>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
+{
+    const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
+    //dx dy
+    outWeights[0][0] = invSizeSq;
+    outWeights[0][1] = -invSizeSq;
+    outWeights[0][2] = -invSizeSq;
+    outWeights[0][3] = invSizeSq;
+    outWeights[0][4] = invSizeSq;
+    outWeights[0][5] = -invSizeSq;
+    outWeights[0][6] = -invSizeSq;
+    outWeights[0][7] = invSizeSq;
+
+    //dx dz
+    outWeights[1][0] = invSizeSq;
+    outWeights[1][1] = -invSizeSq;
+    outWeights[1][2] = invSizeSq;
+    outWeights[1][3] = -invSizeSq;
+    outWeights[1][4] = -invSizeSq;
+    outWeights[1][5] = invSizeSq;
+    outWeights[1][6] = -invSizeSq;
+    outWeights[1][7] = invSizeSq;
+
+    //dy dz
+    outWeights[2][0] = invSizeSq;
+    outWeights[2][1] = invSizeSq;
+    outWeights[2][2] = -invSizeSq;
+    outWeights[2][3] = -invSizeSq;
+    outWeights[2][4] = -invSizeSq;
+    outWeights[2][5] = -invSizeSq;
+    outWeights[2][6] = invSizeSq;
+    outWeights[2][7] = invSizeSq;
+    
+}
 
 struct BicubicInterpolation
 {
