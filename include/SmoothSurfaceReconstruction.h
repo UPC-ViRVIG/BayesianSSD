@@ -11,12 +11,14 @@
 #include "EigenDecompositionLaplacian.h"
 #include <Eigen/Eigenvalues>
 #include "Timer.h"
+#ifdef LOW_RANK_SVD_AVAILABLE
 extern "C"
 {
 #include "low_rank_svd_algorithms_gsl.h"
 #undef min
 #undef max
 }
+#endif
 
 #define M_PI 3.14159265359
 
@@ -413,6 +415,7 @@ namespace SmoothSurfaceReconstruction
                     }
                     break;
                 case LOW_RANK:
+#ifdef LOW_RANK_SVD_AVAILABLE                
                     {
                         Eigen::MatrixXd SVDred(A.transpose());
                         gsl_matrix svdmat;
@@ -446,6 +449,9 @@ namespace SmoothSurfaceReconstruction
 
                         invSVDmat = eV * eS.diagonal() * eU.transpose();
                     }
+#else
+                    std::cout << "LowRankSVD library is not included" << std::endl;
+#endif
                     break;
             }
 
