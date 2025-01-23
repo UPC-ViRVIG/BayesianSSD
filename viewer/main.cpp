@@ -275,6 +275,8 @@ public:
             mPlaneModel->setTransform(mGizmoMatrix);
 
             auto& s = mPlaneModel->getShader();
+            const float invSize = 1.0f / mMeanOctree->getGridBoundingBox().getSize().x;
+            s.setUniform("distanceScale", invSize);
             s.setUniform("worldToStartGridMatrix", glm::translate(glm::mat4(1.0f), -glm::vec3(-0.5f, -0.5f, -0.5f)));
             s.setUniform("startGridSize", glm::vec3(mMeanOctree->getStartGridSize()));
             s.setUniform("octreeValueRange", mMeanOctree->getOctreeValueRange());
@@ -284,7 +286,7 @@ public:
 
             if(mCurrentProp == SDF)
             {
-                uiMan->addSlider(mPlaneModel->getShader(), "linesSpace", "Isolines space", 0.1, 0.01, 0.5);
+                uiMan->addSlider(mPlaneModel->getShader(), "linesSpace", "Isolines space", 0.1, 0.002, 0.5);
                 uiMan->addSlider(mPlaneModel->getShader(), "gridThickness", "Grid thickness", 0.01, 0.001, 0.02);
                 uiMan->addSlider(mPlaneModel->getShader(), "linesThickness", "Isolines thickness", 2.5, 0.5, 6.0);
                 uiMan->addSlider(mPlaneModel->getShader(), "surfaceThickness", "Surface thickness", 2.5, 0.5, 6.0);
@@ -458,7 +460,7 @@ int main(int argc, char** argv)
     mr::ShaderProgramLoader::getInstance()->addSearchPath("./build/_deps/myrender_lib-src/shaders");
     mr::ShaderProgramLoader::getInstance()->addSearchPath("./viewer/shaders");
     mr::MainLoop ml;
-    using MScene = MyScene2;
+    using MScene = MyScene;
     // using MScene = MyScene;
     if(varFieldPath)
     {

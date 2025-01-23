@@ -14,6 +14,7 @@ namespace EigenSolver
             Eigen::BiCGSTAB<Eigen::SparseMatrix<double>, Eigen::IncompleteLUT<double>> solver;
             solver.compute(matrixA);
             result = solver.solve(vectorB);
+            std::cout << "Num Iterations: " << solver.iterations() << std::endl;
         }
     };
 
@@ -25,6 +26,7 @@ namespace EigenSolver
             Eigen::ConjugateGradient<Eigen::SparseMatrix<double>> solver;
             solver.compute(matrixA);
             result = solver.solve(vectorB);
+            std::cout << "Num Iterations: " << solver.iterations() << std::endl;
         }
 
         template<typename TA, typename TB, typename TR>

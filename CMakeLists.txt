@@ -76,17 +76,19 @@ if(NOT nanoflann_lib_POPULATED)
     target_include_directories(nanoflann INTERFACE ${nanoflann_lib_SOURCE_DIR}/include)
 endif()
 
+add_subdirectory(libs)
+
 file(GLOB SOURCE_FILES ./src/*.cpp)
 add_executable(recon_3d src/tools/3D/main.cpp ${SOURCE_FILES})
 target_include_directories(recon_3d PRIVATE src)
 target_include_directories(recon_3d PUBLIC include)
-target_link_libraries(recon_3d PUBLIC eigen glm happly cereal::cereal nanoflann)
+target_link_libraries(recon_3d PUBLIC eigen glm happly cereal::cereal nanoflann LowRandSVD)
 target_compile_options(recon_3d PRIVATE "/bigobj")
 
 add_executable(recon_2d src/tools/2D/main.cpp ${SOURCE_FILES})
 target_include_directories(recon_2d PRIVATE src)
 target_include_directories(recon_2d PUBLIC include)
-target_link_libraries(recon_2d PUBLIC eigen glm happly cereal::cereal nanoflann)
+target_link_libraries(recon_2d PUBLIC eigen glm happly cereal::cereal nanoflann LowRandSVD)
 target_compile_options(recon_2d PRIVATE "/bigobj")
 
 add_subdirectory(viewer)

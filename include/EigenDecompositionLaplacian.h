@@ -35,8 +35,9 @@ namespace EigenDecompositionLaplacian
                 double value = 1.0;
                 for(uint32_t d=0; d < 3; d++)
                 {
-                    value = value * glm::cos(static_cast<double>(coords[d]) * std::numbers::pi * 
-                                             static_cast<double>(gridPoints[p][d]) / static_cast<double>(gridSize[d]-1));
+                    if(gridSize[d] < 2) continue;
+                    value = value * glm::cos(static_cast<double>(gridPoints[p][d]) * std::numbers::pi * 
+                                             static_cast<double>(coords[d]) / static_cast<double>(gridSize[d]-1));
                 }
 
                 eigenVectors(p, v) = value;

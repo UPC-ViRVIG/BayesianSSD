@@ -39,13 +39,13 @@ int main(int argc, char *argv[])
     const glm::vec3 center = 0.5f * (max + min);
     float maxSize = glm::max(size.x, glm::max(size.y, size.z));
     // Add margin
-    maxSize = 1.4f * maxSize;
+    maxSize = 1.75f * maxSize;
 
-	const uint32_t maxDepth = 5;
+	const uint32_t maxDepth = 4;
 	NodeTree<3>::Config quadConfig = {
 		.minCoord = center - glm::vec3(0.5f * maxSize),
 		.maxCoord = center + glm::vec3(0.5f * maxSize),
-		.pointFilterMaxDistance = 1.55f * maxSize / static_cast<float>(1 << maxDepth),
+		.pointFilterMaxDistance = 10000.55f * maxSize / static_cast<float>(1 << maxDepth),
 		.constraintNeighbourNodes = true,
 		.maxDepth = maxDepth
 	};
@@ -53,9 +53,10 @@ int main(int argc, char *argv[])
 	SmoothSurfaceReconstruction::Config<3> config = {
 		.posWeight = 1.0f, 
         .gradientWeight = 1.0f/0.5f,
-        .smoothWeight = 1.0f/100.0f,
-		.algorithm = SmoothSurfaceReconstruction::Algorithm::VAR,
-		.computeVariance = false
+        // .smoothWeight = 1.0f/150.0f,
+		.smoothWeight = 1.0f/10.f,
+		.algorithm = SmoothSurfaceReconstruction::Algorithm::FULL,
+		.computeVariance = true
 	};
 
 	Timer timer;
@@ -63,6 +64,8 @@ int main(int argc, char *argv[])
 
 	NodeTree<3> octree;
 	octree.compute(cloud, quadConfig);
+
+	std::cout << "Octree creation " << timer.getElapsedSeconds() << std::endl;
 
 	std::optional<LinearNodeTree<3>> covScalarField;
 
@@ -72,9 +75,17 @@ int main(int argc, char *argv[])
 	std::cout << "Compute linear node " << timer.getElapsedSeconds() << std::endl;
 
     // Export octree
-    std::ofstream os("./output/test.bin", std::ios::out | std::ios::binary);
-    cereal::PortableBinaryOutputArchive archive(os);
-    archive(*scalarField);
+	{
+		std::ofstream os("./output/sphere.bin", std::ios::out | std::ios::binary);
+		cereal::PortableBinaryOutputArchive archive(os);
+		archive(*scalarField);
+	}
+
+	{
+		std::ofstream os("./output/sphereVar.bin", std::ios::out | std::ios::binary);
+		cereal::PortableBinaryOutputArchive archive(os);
+		archive(*covScalarField);
+	}
 
 	std::cout << "output" << std::endl;
 

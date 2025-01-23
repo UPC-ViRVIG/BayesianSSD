@@ -391,15 +391,15 @@ int main(int argc, char *argv[])
     const glm::vec2 center = 0.5f * (max + min);
     float maxSize = glm::max(size.x, size.y);
     // Add margin
-    maxSize = 1.2f * maxSize;
+    maxSize = 1.7f * maxSize;
 
-	const uint32_t maxDepth = 6;
+	const uint32_t maxDepth = 8;
 	NodeTree<2>::Config quadConfig = {
 		// .minCoord = NodeTree<2>::vec(0.0f),
 		// .maxCoord = NodeTree<2>::vec(1.0f),
 		.minCoord = center - glm::vec2(0.5f * maxSize),
 		.maxCoord = center + glm::vec2(0.5f * maxSize),
-		.pointFilterMaxDistance = 1.23f * maxSize / static_cast<float>(1 << maxDepth),
+		.pointFilterMaxDistance = 1.33f * maxSize / static_cast<float>(1 << maxDepth),
 		.constraintNeighbourNodes = true,
 		.maxDepth = maxDepth
 	};
@@ -407,43 +407,14 @@ int main(int argc, char *argv[])
 	NodeTree<2> quad;
 	quad.compute(cloud, quadConfig);
 
-	// std::vector<float> values = read_array_from_txt_file("./test/data.txt");
-	// std::vector<float> vValues(values.size());
-	// for(uint32_t i=0; i < 64; i++)
-	// {
-	// 	for(uint32_t j=0; j < 64; j++)
-	// 	{
-	// 		glm::vec2 p(float(i)/64.0f + 1e-6, float(j)/64.0f + 1e-6);
-	// 		std::optional<NodeTree<2>::Node> node;
-	// 		quad.getNode(p, node);
-	// 		if(node)
-	// 		{
-	// 			vValues[node->controlPointsIdx[0]] = values[j * 65 + i];
-	// 		}
-	// 	}
-	// }
-
-	// std::unique_ptr<LinearNodeTree<2>> scalarField = std::make_unique<LinearNodeTree<2>>(std::move(quad), std::move(vValues));
-
 	SmoothSurfaceReconstruction::Config<2> config = {
 		.posWeight = 1.0f, 
-        .gradientWeight = 1/0.5f,
-        .smoothWeight = 1/1.0f,
+        .gradientWeight = 1/0.1f,
+        .smoothWeight = 1/0.5f,
 		.algorithm = SmoothSurfaceReconstruction::Algorithm::VAR,
-		.computeVariance = true
+		.computeVariance = true,
+		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::BASE_RED
 	};
-
-	// PoissonReconstruction::Config<2> config = {};
-	
-	std::vector<float> eigenValues;
-	std::vector<float> verticesEnergy;
-	// std::unique_ptr<CubicNodeTree<2>> scalarField = 
-	// 	SmoothSurfaceReconstruction::compute2DCubicNodeTree<2>(cloud, config, std::nullopt, verticesEnergy, eigenValues);
-
-	// std::unique_ptr<CubicNodeTree<2>> scalarField = 
-	// 	SmoothSurfaceReconstruction::compute2DCubicNodeTree<2>(std::move(quad), cloud, config, verticesEnergy, eigenValues);
-		
-	// SmoothSurfaceReconstruction::computeCubicNodeLoss<2>(*scalarField, cloud, config);
 
 	std::optional<LinearNodeTree<2>> covScalarField;
 	std::optional<Eigen::MatrixXd> invCovMat;
@@ -456,6 +427,156 @@ int main(int argc, char *argv[])
 	std::unique_ptr<LinearNodeTree<2>> scalarField = 
 		SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config, covScalarField, invCovMat, covMat, matP, matN, matS, vecW);
 
+
+	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
+	// 	GPReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, covScalarField);
+
+
+	// Eigen::JacobiSVD<Eigen::MatrixXd> svd(covMat.value(), Eigen::ComputeThinU | Eigen::ComputeThinV);
+	// Eigen::VectorXd sv = svd.singularValues();
+	// uint32_t numZeros = 0;
+	// for(uint32_t i=0; i < sv.size(); i++)
+	// {
+	// 	if(sv(i) > 1e-9)
+	// 	{
+	// 		sv(i) = 1.0f / sv(i);
+	// 	}
+	// 	else
+	// 	{
+	// 		numZeros++;
+	// 		sv(i) = 0.0f;
+	// 	}
+	// }
+	// std::cout << "num zeros " << numZeros << std::endl;
+	// Eigen::MatrixXd invCovMat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
+
+	std::cout << "End compute" << std::endl;
+
+	// Eigen::LLT<Eigen::MatrixXd> covLLT(covMat.value());
+	// Eigen::MatrixXd L = covLLT.matrixL();
+	// std::cout << "End compute Cholensky" << std::endl;
+
+	// Eigen::VectorXd basicGaussianValues(vecW.value().rows());
+
+	// std::random_device rd{};
+    // std::mt19937 gen{rd()};
+
+	// std::normal_distribution gaussianSampler;
+
+	// std::vector<double> sumW(vecW.value().rows(), 0.0);
+	// auto vSumW = Eigen::Map<Eigen::VectorXd>(sumW.data(), sumW.size());
+
+	// std::cout << "Start sampling" << std::endl;
+	// // const uint32_t numSamples = 2048000;
+	// const uint32_t numSamples = 20480;
+	// double sumWeights = 0.0;
+	// std::vector<double> differences;
+	// double mg = 0.0;
+	// double mp = 0.0;
+	// double mw = 0.0;
+	// double mw2 = 0.0;
+	// double imw = 0.0;
+	// double imw2 = 0.0;
+	// for(uint32_t s = 0; s < numSamples; s++)
+	// {
+	// 	for(uint32_t i=0; i < basicGaussianValues.rows(); i++)
+	// 	{
+	// 		basicGaussianValues(i) = gaussianSampler(gen);
+	// 	}
+
+	// 	const double rstd = 1.0;
+	// 	const double rinvcov = 1.0 / (rstd * rstd);
+	// 	Eigen::VectorXd newW = vecW.value() + rstd * L * basicGaussianValues;
+	// 	double g = 1.54203e201 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
+	// 	// double g = 5.78e202 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
+	// 	mg += g / static_cast<double>(numSamples);
+	// 	double p = 1.54203e207 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
+	// 	// double p = 10474275180.2 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
+	// 	mp += p / static_cast<double>(numSamples);
+	// 	double weight = p / g;
+	// 	mw += weight / static_cast<double>(numSamples);
+	// 	mw2 += weight * weight / static_cast<double>(numSamples);
+	// 	double iweight = g / p;
+	// 	imw += iweight / static_cast<double>(numSamples);
+	// 	imw2 += iweight * iweight / static_cast<double>(numSamples);
+	// 	if(glm::isnan(weight)) continue;
+	// 	auto diff = (newW - vecW.value());
+	// 	for(uint32_t i=0; i < newW.rows(); i++)
+	// 	{
+	// 		vSumW(i) += weight * diff(i) * diff(i);
+	// 	}
+	// 	sumWeights += weight;
+	// 	if(std::any_of(sumW.begin(), sumW.end(), [] (double v) { return glm::isnan(v); }))
+	// 	{
+	// 		std::cout << "nan " << std::endl;
+	// 	}
+	// 	// std::cout << s  << " " << weight << ", "; 
+
+	// 	if(s % 100 == 0)
+	// 	{
+	// 		double d = 0.0;
+	// 		for(uint32_t i=0; i < newW.rows(); i++)
+	// 		{
+	// 			const double v = (vSumW(i) / sumWeights - covMat.value()(i, i));
+	// 			d += v * v;
+	// 		}
+	// 		differences.push_back(d);
+
+	// 		double as = 0.0;
+	// 		for(uint32_t i=0; i < newW.rows(); i++)
+	// 		{
+	// 			const double v = (vSumW(i) - covMat.value()(i, i));
+	// 			as += glm::abs(v) / static_cast<double>(newW.rows());
+	// 		}
+
+	// 		if(s % 10000 == 0 || d > 1e10)
+	// 		{
+	// 			std::cout << s  << ": " << as << " // " << sumWeights  << " // " << d << std::endl;
+	// 		}
+	// 	}
+	// }
+
+	// std::cout << std::endl;
+
+	// std::cout << mg << " // " << mp << std::endl;
+	// std::cout << mw << " // " << glm::sqrt(mw2 - mw * mw)  << std::endl;
+	// std::cout << imw << " // " << glm::sqrt(imw2 - imw * imw)  << std::endl;
+
+	// std::cout << "End sampling" << std::endl;
+
+	// vSumW = vSumW / sumWeights;
+
+	// std::vector<float> fSumW(sumW.size());
+	// for(uint32_t i=0; i < fSumW.size(); i++)
+	// {
+	// 	fSumW[i] = sumW[i];
+	// }
+
+	// covScalarField = LinearNodeTree<2>(std::move(covScalarField->getNodeTree()), std::move(fSumW));
+
+	// write_array_to_file(differences, "diff2.bin");
+
+	// NodeTree<2>::Config quadConfig2 = {
+	// 	.minCoord = NodeTree<2>::vec(0.0f),
+	// 	.maxCoord = NodeTree<2>::vec(1.0f),
+	// 	.pointFilterMaxDistance = 0.0f / static_cast<float>(1 << maxDepth),
+	// 	//.pointFilterMaxDistance = 0.0f,
+	// 	.constraintNeighbourNodes = true,
+	// 	.maxDepth = maxDepth
+	// };
+
+	// NodeTree<2> quad;
+	// quad.compute(cloud, quadConfig2);
+
+	// std::unique_ptr<CubicNodeTree<2>> scalarField = std::make_unique<CubicNodeTree<2>>(std::move(quad), *scalarField1);
+
+	// config.nodeTreeConfig = quadConfig2;
+	// SmoothSurfaceReconstruction::computeCubicNodeLoss<2>(*scalarField, cloud, config);
+
+	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
+	// 	SmoothSurfaceReconstruction::computeLinearNodeTree<2, EigenSquareSolver>(cloud, config);
+	
+	
 	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
 	// 	GPReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, covScalarField);
 
@@ -629,10 +750,10 @@ int main(int argc, char *argv[])
 		colimage.savePNG("quadtreePSurface.png");
 	}
 
-	Image imageG;
-	imageG.init(2048, 2048);
-	drawGradientMaginitudeImage(imageG, *scalarField);
-	imageG.savePNG("quadtreeGrad.png"); 
+	// Image imageG;
+	// imageG.init(2048, 2048);
+	// drawGradientMaginitudeImage(imageG, *scalarField);
+	// imageG.savePNG("quadtreeGrad.png"); 
 
 	// draw1DField(*scalarField, *covScalarField);
 
