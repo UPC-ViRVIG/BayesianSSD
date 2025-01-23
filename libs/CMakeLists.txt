@@ -6,14 +6,26 @@ cmake_minimum_required(VERSION 3.16)
 # pkg_check_modules(GSL REQUIRED IMPORTED_TARGET gsl)
 
 # Add gsl
-add_library(gsl INTERFACE)
-find_library(gsl_lib NAMES gsl.lib PATHS "$ENV{CONDA_PREFIX}/Library/lib/" REQUIRED)
-target_link_libraries(gsl INTERFACE ${gsl_lib})
-target_include_directories(gsl INTERFACE "$ENV{CONDA_PREFIX}/Library/include")
 
-file(GLOB SOURCE_FILES ./LowRankSVDCodes/single_core_gsl_code/low_rank_svd_algorithms_gsl.c
-                       ./LowRankSVDCodes/single_core_gsl_code/matrix_vector_functions_gsl.c)
-add_library(LowRandSVD ${SOURCE_FILES})
-target_include_directories(LowRandSVD PUBLIC ./LowRankSVDCodes/single_core_gsl_code/)
-target_link_libraries(LowRandSVD gsl)
+find_library(gsl_lib NAMES gsl.lib PATHS "$ENV{CONDA_PREFIX}/Library/lib/")
+
+if(gsl_lib)
+    add_library(gsl INTERFACE)
+    target_link_libraries(gsl INTERFACE ${gsl_lib})
+    target_include_directories(gsl INTERFACE "$ENV{CONDA_PREFIX}/Library/include")
+    message(${gsl_lib})
+endif()
+
+set(LowRankSVD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/LowRankSVDCodes/single_core_gsl_code")
+if((EXISTS "${LowRankSVD_DIR}") AND (TARGET gsl))
+    file(GLOB SOURCE_FILES "${LowRankSVD_DIR}/low_rank_svd_algorithms_gsl.c"
+                           "${LowRankSVD_DIR}/matrix_vector_functions_gsl.c")
+    add_library(LowRankSVD ${SOURCE_FILES})
+    target_include_directories(LowRankSVD PUBLIC "${LowRankSVD_DIR}")
+    target_link_libraries(LowRankSVD gsl)
+    target_compile_definitions(LowRankSVD PUBLIC LOW_RANK_SVD_AVAILABLE)
+    message("Using LowRankSVD library")
+else()
+    add_library(LowRankSVD INTERFACE)
+endif()
 
