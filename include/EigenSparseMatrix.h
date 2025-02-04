@@ -15,7 +15,7 @@ public:
         vector.push_back(value);
     }
 
-    Eigen::VectorXd getVector()
+    auto getVector()
     {
         return Eigen::Map<Eigen::VectorXd>(vector.data(), vector.size());
     }

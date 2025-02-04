@@ -193,6 +193,34 @@ namespace SmoothSurfaceReconstruction
             }
         };
 
+        std::function<void(EigenSparseMatrix& mat, uint32_t, uint32_t, float)> setUnkownTerm;
+        setUnkownTerm = [&](EigenSparseMatrix& mat, uint32_t vertId1, uint32_t vertId2, float value)
+        {
+            if(vertIdToUnknownVertId[vertId1] == std::numeric_limits<uint32_t>::max())
+            {
+                const ConstrainedUnknown& constraint = constraints[vertId1];
+                for(uint32_t i=0; i < constraint.numOperators; i++)
+                {
+                    setUnkownTerm(mat, constraint.vertIds[i], vertId2, value * constraint.weights[i]);
+                }
+            }
+            else
+            {
+                if(vertIdToUnknownVertId[vertId2] == std::numeric_limits<uint32_t>::max())
+                {
+                    const ConstrainedUnknown& constraint = constraints[vertId2];
+                    for(uint32_t i=0; i < constraint.numOperators; i++)
+                    {
+                        setUnkownTerm(mat, vertId1, constraint.vertIds[i], value * constraint.weights[i]);
+                    }
+                }
+                else
+                {
+                    mat.addTerm(vertIdToUnknownVertId[vertId1], vertIdToUnknownVertId[vertId2], value);
+                }
+            }
+        };
+
         EigenSparseMatrix pointsMatrix(numUnknows);
         EigenSparseMatrix pointsCovMatrix(cloud.size());
         EigenSparseMatrix gradientMatrix(numUnknows);
@@ -234,110 +262,204 @@ namespace SmoothSurfaceReconstruction
         }
 
         // Generate Node equations
-        constexpr bool extrapolateLaplacian = false;
-        EigenSparseMatrix smoothMatrix(numUnknows);
+        // constexpr bool extrapolateLaplacian = false;
+        EigenSparseMatrix smoothMatrix1(numUnknows);
+        EigenVector smoothFactor1;
+        EigenSparseMatrix smoothMatrix2(numUnknows);
+        EigenVector smoothFactor2;
+
         const unsigned int numNodesAtMaxDepth = 1 << quad.getMaxDepth();
-        const vec nodeSize = (quad.getMaxCoord() - quad.getMinCoord()) / static_cast<float>(numNodesAtMaxDepth) - vec(1e-6);
+        const vec quadSize = quad.getMaxCoord() - quad.getMinCoord();
+        const vec nodeSize = quadSize / static_cast<float>(numNodesAtMaxDepth) - vec(1e-6);
         const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
+        double totalVolume = 1.0;
+        for(uint32_t d=0; d < Dim; d++) totalVolume *= quadSize[d];
+        const double invTotalVolume = 1.0 / totalVolume; 
+        double sumVolume = 0.0;
         for(uint32_t i = 0; i < quad.getNumVertices(); i++)
         {
             if(vertIdToUnknownVertId[i] == std::numeric_limits<uint32_t>::max())
                 continue;
 
+            std::array<Node, NodeTree<Dim>::NumAdjacentNodes> nodes;
+            uint32_t numNodes = quad.getAdjacentNodes(i, nodes);
+            std::array<std::array<float, 2>, Dim> dirMaxSizes;
+            std::array<std::array<uint32_t, 2>, Dim> dirMinDepth;
+            dirMaxSizes.fill({0.0f, 0.0f});
+            dirMinDepth.fill({0, 0});
+            for(uint32_t j=0; j < numNodes; j++)
+            {
+                const vec size = nodes[j].maxCoord - nodes[j].minCoord;
+                const vec center = 0.5f * (nodes[j].maxCoord + nodes[j].minCoord);
+                for(uint32_t d=0; d < Dim; d++)
+                {
+                    const uint32_t sId = center[d] < quad.getVertices()[i][d] ? 0 : 1;
+                    float& v = dirMaxSizes[d][sId];
+                    if(v < size[d])
+                    {
+                        v = size[d];
+                        dirMinDepth[d][sId] = nodes[j].depth;
+                    }
+                }
+            }
+
+            float v = 1.0;
             for(uint32_t d=0; d < Dim; d++)
             {
-                uint32_t numValidSides = 0;
+                v *= (0.5 * dirMaxSizes[d][0] + 0.5 * dirMaxSizes[d][1]);
+            }
+            sumVolume += v;
+
+            for(uint32_t d=0; d < Dim; d++)
+            {
+                // uint32_t numValidSides = 0;
                 vec side;
+                double inteArea = 1.0;
                 for(uint32_t j=0; j < Dim; j++)
+                {
                     side[j] = (d == j) ? 1.0f : 0.0f;
+                    if(d != j) inteArea *= (0.5 * dirMaxSizes[j][0] + 0.5 * dirMaxSizes[j][1]);
+                }                    
                 
                 std::optional<Node> node;
-				bool valid = true;
-                float validSign = 0.0f;
-				for(float sign : {-1.0f, 1.0f})
-				{
-                    const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
-					quad.getNode(coord, node);
-					if(!node) { 
-                        valid = false;
-                        validSign = -sign; // The valid sign is the opposite one
-                        break;
-                    }
-				}
+				// bool valid = true;
+                // float validSign = 0.0f;
+				// for(float sign : {-1.0f, 1.0f})
+				// {
+                //     const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
+				// 	quad.getNode(coord, node);
+				// 	if(!node) { 
+                //         valid = false;
+                //         validSign = -sign; // The valid sign is the opposite one
+                //         break;
+                //     }
+				// }
+                const bool valid = dirMinDepth[d][0] > 0 && dirMinDepth[d][1] > 0;
 
                 // All the sides are valid
 				// if(!valid) continue;
                 if(valid)
                 {
-                    for(float sign : {-1.0f, 1.0f})
+                    // Calculate weights
+                    const double cw = 2.0f * inteArea / invTotalVolume;
+                    double minPartWeight = 0.5 * glm::pow(2.0, (dirMinDepth[d][1]-dirMinDepth[d][0]));
+                    double maxPartWeight = 0.5 * glm::pow(2.0, (dirMinDepth[d][0]-dirMinDepth[d][1]));
+
+                    std::array<float, Inter::NumControlPoints> weights;
+                    // -1
+                    vec coord = quad.getVertices()[i] - dirMaxSizes[d][0] * side;
+                    quad.getNode(coord, node);
+                    Inter::eval(node->transformToLocalCoord(coord), weights);
+                    const double w11 = 0.5 / dirMaxSizes[d][0];
+                    const double w12 = maxPartWeight / dirMaxSizes[d][1];
+                    for(uint32_t j=0; j < Inter::NumControlPoints; j++)
                     {
-                        const vec coord = quad.getVertices()[i] + sign * nodeSize * side;
-                        quad.getNode(coord, node);
-                        std::array<float, Inter::NumControlPoints> weights;
-                        Inter::eval(node->transformToLocalCoord(coord), weights);
-                        for(uint32_t j=0; j < Inter::NumControlPoints; j++)
+                        if(glm::abs(weights[j]) > 1e-8)
                         {
-                            if(glm::abs(weights[j]) > 1e-8)
-                            {
-                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], invSizeSq * weights[j]);
-                            }
+                            setUnkownValue(smoothMatrix1, node->controlPointsIdx[j], w11 * weights[j]);
+                            setUnkownValue(smoothMatrix2, node->controlPointsIdx[j], w12 * weights[j]);
                         }
                     }
-                    numValidSides++;
-                    if(numValidSides > 0) 
+
+                    // 1
+                    coord = quad.getVertices()[i] + dirMaxSizes[d][1] * side;
+                    quad.getNode(coord, node);
+                    Inter::eval(node->transformToLocalCoord(coord), weights);
+                    const double w21 = minPartWeight / dirMaxSizes[d][0];
+                    const double w22 = 0.5 / dirMaxSizes[d][1];
+                    for(uint32_t j=0; j < Inter::NumControlPoints; j++)
                     {
-                        setUnkownValue(smoothMatrix, i, -2.0f * invSizeSq * static_cast<float>(numValidSides));
-                        smoothMatrix.endEquation();
-                    }
-                }
-                else if(extrapolateLaplacian)
-                {
-                    for(uint32_t j = 1; j <= 2; j++)
-                    {
-                        const vec coord = quad.getVertices()[i] + (validSign * static_cast<float>(j)) * nodeSize * side;
-                        quad.getNode(coord, node);
-                        std::array<float, Inter::NumControlPoints> weights;
-                        Inter::eval(node->transformToLocalCoord(coord), weights);
-                        float w = (j == 1) ? 2.0f : -1.0f;
-                        for(uint32_t j=0; j < Inter::NumControlPoints; j++)
+                        if(glm::abs(weights[j]) > 1e-8)
                         {
-                            if(glm::abs(weights[j]) > 1e-8)
-                            {
-                                setUnkownValue(smoothMatrix, node->controlPointsIdx[j], invSizeSq * w * weights[j]);
-                            }
+                            setUnkownValue(smoothMatrix1, node->controlPointsIdx[j], w21 * weights[j]);
+                            setUnkownValue(smoothMatrix2, node->controlPointsIdx[j], w22 * weights[j]);
                         }
                     }
-                    numValidSides++;
+
+                    setUnkownValue(smoothMatrix1, i, -(w11+w21));
+                    smoothFactor1.addTerm(2.0 * cw / dirMaxSizes[d][0]);
+                    smoothMatrix1.endEquation();
+                    setUnkownValue(smoothMatrix2, i, -(w21+w22));
+                    smoothFactor2.addTerm(2.0 * cw / dirMaxSizes[d][1]);
+                    smoothMatrix2.endEquation();
+
+                    // uint32_t sId = 0;
+                    // for(float sign : {-1.0f, 1.0f})
+                    // {
+                    //     const vec coord = quad.getVertices()[i] + sign * dirMaxSizes[d][sId] * side;
+                    //     quad.getNode(coord, node);
+                    //     Inter::eval(node->transformToLocalCoord(coord), weights);
+                    //     for(uint32_t j=0; j < Inter::NumControlPoints; j++)
+                    //     {
+                    //         if(glm::abs(weights[j]) > 1e-8)
+                    //         {
+                    //             setUnkownValue(smoothMatrix, node->controlPointsIdx[j], invSizeSq * weights[j]);
+                    //         }
+                    //     }
+                    //     sId++;
+                    // }
+                    // numValidSides++;
+                    // if(numValidSides > 0) 
+                    // {
+                    // }
                 }
+                // else if(extrapolateLaplacian)
+                // {
+                //     for(uint32_t j = 1; j <= 2; j++)
+                //     {
+                //         const vec coord = quad.getVertices()[i] + (validSign * static_cast<float>(j)) * nodeSize * side;
+                //         quad.getNode(coord, node);
+                //         std::array<float, Inter::NumControlPoints> weights;
+                //         Inter::eval(node->transformToLocalCoord(coord), weights);
+                //         float w = (j == 1) ? 2.0f : -1.0f;
+                //         for(uint32_t j=0; j < Inter::NumControlPoints; j++)
+                //         {
+                //             if(glm::abs(weights[j]) > 1e-8)
+                //             {
+                //                 setUnkownValue(smoothMatrix, node->controlPointsIdx[j], invSizeSq * w * weights[j]);
+                //             }
+                //         }
+                //     }
+                //     numValidSides++;
+                // }
 			}
         }
 
+        std::cout << "Volume: " << sumVolume << " , " << totalVolume << std::endl;
+
+        EigenSparseMatrix smoothMatrix3(numUnknows);
+        std::array<std::array<float, Inter::NumControlPoints>, Inter::NumControlPoints> sGradWeights;
+        Inter::evalSecondGradIntegGrad(sGradWeights);
         for(const Node& n : quad)
         {
             std::array<std::array<float, Inter::NumControlPoints>, Inter::NumSecondGrad> weights;
-            Inter::evalSecondGradInteg(n.maxCoord - n.minCoord, weights);
-            uint32_t d = 0;
-            for(const auto& w : weights)
+            const double factor = static_cast<float>(invTotalVolume) * Inter::factorSecondGradIntegGrad(n.maxCoord - n.minCoord);
+            for(uint32_t i=0; i < Inter::NumControlPoints; i++)
             {
-                for(uint32_t i=0; i < Inter::NumControlPoints; i++)
+                for(uint32_t j=0; j < Inter::NumControlPoints; j++)
                 {
-                    setUnkownValue(smoothMatrix, n.controlPointsIdx[i], weights[d][i]);
+                    if(glm::abs(weights[j][i]) > 1e-8)
+                    {
+                        setUnkownTerm(smoothMatrix3, n.controlPointsIdx[i], n.controlPointsIdx[j], factor * weights[j][i]);
+                    }
                 }
-                smoothMatrix.endEquation();
-                d++;
             }
         }
 
         Eigen::SparseMatrix<double> P = pointsMatrix.getMatrix();
         Eigen::SparseMatrix<double> covP = pointsCovMatrix.getMatrix();
         Eigen::SparseMatrix<double> N = gradientMatrix.getMatrix();
-        Eigen::SparseMatrix<double> S = smoothMatrix.getMatrix();
-        // S = S * S; // Bilaplacian
+        Eigen::SparseMatrix<double> S1 = smoothMatrix1.getMatrix();
+        auto fS1 = smoothFactor1.getVector();
+        Eigen::SparseMatrix<double> S2 = smoothMatrix2.getMatrix();
+        auto fS2 = smoothFactor2.getVector();
+        Eigen::SparseMatrix<double> S3 = smoothMatrix3.getMatrix();
+        // Eigen::SparseMatrix<double> dS = S1.transpose() * fS1.asDiagonal() * S1 + S2.transpose() * fS2.asDiagonal() * S2 + S3;
+        Eigen::SparseMatrix<double> dS = S1.transpose() * fS1.asDiagonal() * S1 + S2.transpose() * fS2.asDiagonal() * S2 + S3;
         float invVarSmoothing = config.smoothWeight * config.smoothWeight;
-        invVarSmoothing = invVarSmoothing * invVarSmoothing;
         float invVarGradient = config.gradientWeight * config.gradientWeight;
         Eigen::VectorXd b = N.transpose() * invVarGradient * gradientVector.getVector();
-        Eigen::SparseMatrix<double> A = P.transpose() * covP.diagonal().asDiagonal().inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * S.transpose() * S;
+        Eigen::SparseMatrix<double> A = P.transpose() * covP.diagonal().asDiagonal().inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * dS;
         // Eigen::SparseMatrix<double> A = P.transpose() * covP.diagonal().asDiagonal().inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * (S.transpose() * S);
 
         std::cout << "Time setting the problem: " << timer.getElapsedSeconds() << std::endl;
@@ -354,7 +476,7 @@ namespace SmoothSurfaceReconstruction
                 case FULL:
                 case BASE_RED:
                     {
-                        Eigen::MatrixXd SVDmat(A);
+                        Eigen::MatrixXd SVDmat;
                         Eigen::MatrixXd conv;
                         Eigen::BDCSVD<Eigen::MatrixXd> svd;
                         if(config.invAlgorithm == BASE_RED)
@@ -377,17 +499,40 @@ namespace SmoothSurfaceReconstruction
                                 conv = EigenDecompositionLaplacian::getMatrix(glm::ivec3(numNodesAtMaxDepth+1), gridPoints, K);
                             }
 
-                            Eigen::HouseholderQR<Eigen::MatrixXd> qr(conv);
-                            Eigen::MatrixXd thinQ = Eigen::MatrixXd::Identity(conv.rows(), conv.cols());
-                            Eigen::MatrixXd q = qr.householderQ();
-                            thinQ = qr.householderQ() * thinQ;
-                            conv = thinQ;
+                            // std::cout << "QR" << std::endl;
+                            // Eigen::HouseholderQR<Eigen::MatrixXd> qr(conv);
+                            // Eigen::MatrixXd thinQ = Eigen::MatrixXd::Identity(conv.rows(), conv.cols());
+                            // Eigen::MatrixXd q = qr.householderQ();
+                            // thinQ = qr.householderQ() * thinQ;
+                            // conv = thinQ;
                             // writeMatrixToFile(thinQ, "conv.bin");
-                            
-                            svd = Eigen::BDCSVD<Eigen::MatrixXd>(conv.transpose() * SVDmat * conv, Eigen::ComputeThinU | Eigen::ComputeThinV);
+
+                            // RowMMatrixXd convRM = conv;
+                            // gsl_matrix *glsConv = gsl_matrix_calloc(convRM.rows(), convRM.cols());
+                            // std::memcpy(glsConv->data, convRM.data(), convRM.rows() * convRM.cols() * sizeof(double));
+
+                            // gsl_matrix *glsThinQ = gsl_matrix_calloc(convRM.rows(), convRM.cols());
+
+                            // timer.start();
+                            // std::cout << "Start QR" << std::endl;
+                            // QR_factorization_getQ(glsConv, glsThinQ);
+                            // std::cout << "QR facto: " << timer.getElapsedSeconds() << std::endl;
+
+                            // conv = Eigen::Map<RowMMatrixXd>(glsThinQ->data, glsThinQ->size1, glsThinQ->size2);
+                            // writeMatrixToFile(conv, "conv.bin");
+
+                            std::cout << "Red" << std::endl;
+                            timer.start();
+                            Eigen::MatrixXd SVDredMat = conv.transpose() * A * conv;
+                            std::cout << timer.getElapsedSeconds() << std::endl;
+                            std::cout << "SVD" << std::endl;
+                            timer.start();
+                            svd = Eigen::BDCSVD<Eigen::MatrixXd>(SVDredMat, Eigen::ComputeThinU | Eigen::ComputeThinV);
+                            std::cout << timer.getElapsedSeconds() << std::endl;
                         }
                         else
                         {
+                            SVDmat = Eigen::MatrixXd(A);
                             svd = Eigen::BDCSVD<Eigen::MatrixXd>(SVDmat, Eigen::ComputeThinU | Eigen::ComputeThinV);
                         }
                         
@@ -406,7 +551,10 @@ namespace SmoothSurfaceReconstruction
 
                         if(config.invAlgorithm == BASE_RED)
                         {
+                            std::cout << "Cal inv" << std::endl;
+                            timer.start();
                             invSVDmat = conv * svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint() * conv.transpose();
+                            std::cout << timer.getElapsedSeconds() << std::endl;
                         }
                         else
                         {
@@ -427,7 +575,9 @@ namespace SmoothSurfaceReconstruction
                         svdmat.block = NULL;
 
                         gsl_matrix *gU, *gS, *gV;
+                        timer.start();
                         randomized_low_rank_svd1(&svdmat, K, &gU, &gS, &gV);
+                        std::cout << timer.getElapsedSeconds() << std::endl;
 
                         for(uint32_t i=0; i < K; i++)
                         {
@@ -463,12 +613,18 @@ namespace SmoothSurfaceReconstruction
             {
                 case VAR:
                     {
+                        std::cout << "M1" << std::endl;
+                        timer.start();
                         auto sA = P.transpose() * covP.diagonal().asDiagonal().inverse() * P + invVarGradient * N.transpose() * N;
                         Eigen::MatrixXd sASVD = sA * invSVDmat.transpose();
+                        std::cout << timer.getElapsedSeconds() << std::endl;
+                        std::cout << "M2" << std::endl;
+                        timer.start();
                         for(uint32_t i=0; i < numUnknows; i++) // Compute only the diagonal
                         {
                             CovX(i, i) = invSVDmat.row(i).dot(sASVD.col(i));
                         }
+                        std::cout << timer.getElapsedSeconds() << std::endl;
                     }
                     break;
                 case BAYESIAN:
@@ -484,18 +640,18 @@ namespace SmoothSurfaceReconstruction
         }
         
         std::vector<double> unknownsValues(numUnknows, 1.0f);
-        { // Test mul performance
-            auto a = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
-            // Eigen::VectorXd a = Eigen::VectorXd::Ones(numUnknows);
-            Eigen::VectorXd b = Eigen::VectorXd::Ones(numUnknows);
-            const uint32_t numIt = 1000; 
-            timer.start();
-            for(uint32_t i=0; i < 1000; i++)
-            {
-                b = A * a;
-            }
-            std::cout << "Mul time: " << (timer.getElapsedSeconds() / static_cast<float>(numIt)) << std::endl;
-        }
+        // { // Test mul performance
+        //     auto a = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
+        //     // Eigen::VectorXd a = Eigen::VectorXd::Ones(numUnknows);
+        //     Eigen::VectorXd b = Eigen::VectorXd::Ones(numUnknows);
+        //     const uint32_t numIt = 1000; 
+        //     timer.start();
+        //     for(uint32_t i=0; i < 1000; i++)
+        //     {
+        //         b = A * a;
+        //     }
+        //     std::cout << "Mul time: " << (timer.getElapsedSeconds() / static_cast<float>(numIt)) << std::endl;
+        // }
 
         std::cout << "Matrix: " << A.rows() << " x " << A.cols() << std::endl;
         std::cout << "Sparsity: " << A.nonZeros() << " / " << A.cols() * A.rows() << std::endl;
@@ -508,6 +664,7 @@ namespace SmoothSurfaceReconstruction
         // EigenSolver::BiCGSTAB::solve(A, b, x);
         EigenSolver::CG::solve(A, b, x);
 
+        // std::cout << "Smooth value" << (dS * x).sum() << std::endl;
         std::cout << "Time solving problem: " << timer.getElapsedSeconds() << std::endl;
 
         timer.start();

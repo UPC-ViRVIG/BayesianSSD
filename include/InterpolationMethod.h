@@ -58,53 +58,110 @@ struct MultivariateLinearInterpolation
     }
 
     static constexpr uint32_t NumSecondGrad = (Dim == 2) ? 1 : 3;
-    static void evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) {}
+    static void evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) {}
+    static float factorSecondGradIntegGrad(vec nodeSize) {}
 };
 
 template<>
-static inline void MultivariateLinearInterpolation<2>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
+static float MultivariateLinearInterpolation<2>::factorSecondGradIntegGrad(vec nodeSize) 
 {
-    const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
-    outWeights[0][0] = invSizeSq;
-    outWeights[0][1] = -invSizeSq;
-    outWeights[0][2] = -invSizeSq;
-    outWeights[0][3] = invSizeSq;
+    return 1.0 / (nodeSize[0] * nodeSize[0]);
 }
 
 template<>
-static inline void MultivariateLinearInterpolation<3>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
+static inline void MultivariateLinearInterpolation<2>::evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) 
 {
-    const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
-    //dx dy
-    outWeights[0][0] = invSizeSq;
-    outWeights[0][1] = -invSizeSq;
-    outWeights[0][2] = -invSizeSq;
-    outWeights[0][3] = invSizeSq;
-    outWeights[0][4] = invSizeSq;
-    outWeights[0][5] = -invSizeSq;
-    outWeights[0][6] = -invSizeSq;
-    outWeights[0][7] = invSizeSq;
+    values[0][0] = 4.0;
+    values[0][1] = -4.0;
+    values[0][2] = -4.0;
+    values[0][3] = 4.0;
+    values[1][0] = -4.0;
+    values[1][1] = 4.0;
+    values[1][2] = 4.0;
+    values[1][3] = -4.0;
+    values[2][0] = -4.0;
+    values[2][1] = 4.0;
+    values[2][2] = 4.0;
+    values[2][3] = -4.0;
+    values[3][0] = 4.0;
+    values[3][1] = -4.0;
+    values[3][2] = -4.0;
+    values[3][3] = 4.0;
+}
 
-    //dx dz
-    outWeights[1][0] = invSizeSq;
-    outWeights[1][1] = -invSizeSq;
-    outWeights[1][2] = invSizeSq;
-    outWeights[1][3] = -invSizeSq;
-    outWeights[1][4] = -invSizeSq;
-    outWeights[1][5] = invSizeSq;
-    outWeights[1][6] = -invSizeSq;
-    outWeights[1][7] = invSizeSq;
+template<>
+static float MultivariateLinearInterpolation<3>::factorSecondGradIntegGrad(vec nodeSize) 
+{
+    return 1.0 / nodeSize[0];
+}
 
-    //dy dz
-    outWeights[2][0] = invSizeSq;
-    outWeights[2][1] = invSizeSq;
-    outWeights[2][2] = -invSizeSq;
-    outWeights[2][3] = -invSizeSq;
-    outWeights[2][4] = -invSizeSq;
-    outWeights[2][5] = -invSizeSq;
-    outWeights[2][6] = invSizeSq;
-    outWeights[2][7] = invSizeSq;
-    
+template<>
+static inline void MultivariateLinearInterpolation<3>::evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) 
+{
+    values[0][0] = 4.;
+    values[0][1] = -2.;
+    values[0][2] = -2.;
+    values[0][3] = 0.;
+    values[0][4] = -2.0;
+    values[0][5] = 0.;
+    values[0][6] = 0.;
+    values[0][7] = 2.0;
+    values[1][0] = -2.;
+    values[1][1] = 4.;
+    values[1][2] = 0.;
+    values[1][3] = -2.;
+    values[1][4] = 0.;
+    values[1][5] = -2.0;
+    values[1][6] = 2.0;
+    values[1][7] = 0.;
+    values[2][0] = -2.;
+    values[2][1] = 0.;
+    values[2][2] = 4.;
+    values[2][3] = -2;
+    values[2][4] = 0.;
+    values[2][5] = 2.0;
+    values[2][6] = -2.0;
+    values[2][7] = 0.;
+    values[3][0] = 0.;
+    values[3][1] = -2.;
+    values[3][2] = -2.;
+    values[3][3] = 4.;
+    values[3][4] = 2.0;
+    values[3][5] = 0.;
+    values[3][6] = 0.;
+    values[3][7] = -2.0;
+    values[4][0] = -2.0;
+    values[4][1] = 0.;
+    values[4][2] = 0.;
+    values[4][3] = 2.0;
+    values[4][4] = 4.0;
+    values[4][5] = -2.0;
+    values[4][6] = -2.0;
+    values[4][7] = 0.;
+    values[5][0] = 0.;
+    values[5][1] = -2.0;
+    values[5][2] = 2.0;
+    values[5][3] = 0.;
+    values[5][4] = -2.0;
+    values[5][5] = 4.0;
+    values[5][6] = 0.;
+    values[5][7] = -2.0;
+    values[6][0] = 0.;
+    values[6][1] = 2.0;
+    values[6][2] = -2.0;
+    values[6][3] = 0.;
+    values[6][4] = -2.0;
+    values[6][5] = 0.;
+    values[6][6] = 4.0;
+    values[6][7] = -2.0;
+    values[7][0] = 2.0;
+    values[7][1] = 0.;
+    values[7][2] = 0.;
+    values[7][3] = -2.0;
+    values[7][4] = 0.;
+    values[7][5] = -2.0;
+    values[7][6] = -2.0;
+    values[7][7] = 4.0;
 }
 
 struct BicubicInterpolation

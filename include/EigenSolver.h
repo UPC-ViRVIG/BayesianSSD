@@ -25,7 +25,7 @@ namespace EigenSolver
         {
             Eigen::ConjugateGradient<Eigen::SparseMatrix<double>> solver;
             solver.compute(matrixA);
-            result = solver.solve(vectorB);
+            result = solver.solveWithGuess(vectorB, result);
             std::cout << "Num Iterations: " << solver.iterations() << std::endl;
         }
 
