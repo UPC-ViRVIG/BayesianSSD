@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 include(FetchContent)
 set(CMAKE_POLICY_DEFAULT_CMP0148 NEW)
 
+option(USE_OPENMP "Use openMP" OFF)
+
 # Eigen
 FetchContent_Declare(eigen_lib
 GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
@@ -65,8 +67,8 @@ endif()
 
 # Nanoflann
 FetchContent_Declare(nanoflann_lib
-GIT_REPOSITORY https://github.com/jlblancoc/nanoflann.git
-GIT_TAG f1e47f0dbae72c11b008fd0d5b1191d9ba1f29bb # 1.5.0
+    GIT_REPOSITORY https://github.com/jlblancoc/nanoflann.git
+    GIT_TAG f1e47f0dbae72c11b008fd0d5b1191d9ba1f29bb # 1.5.0
 )
 
 FetchContent_GetProperties(nanoflann_lib)
@@ -76,19 +78,69 @@ if(NOT nanoflann_lib_POPULATED)
     target_include_directories(nanoflann INTERFACE ${nanoflann_lib_SOURCE_DIR}/include)
 endif()
 
+# MarchingCubes
+FetchContent_Declare(meshreconstruction_lib
+    GIT_REPOSITORY https://github.com/Magnus2/MeshReconstruction.git
+    GIT_TAG 423213b1222cbe97ad45434ab112500111a966ff
+)
+
+FetchContent_GetProperties(meshreconstruction_lib)
+if(NOT meshreconstruction_lib_POPULATED)
+    FetchContent_Populate(meshreconstruction_lib)
+    add_subdirectory(${meshreconstruction_lib_SOURCE_DIR} ${meshreconstruction_lib_BINARY_DIR})
+endif()
+
+#Json struct
+FetchContent_Declare(json_struct_lib
+    GIT_REPOSITORY https://github.com/jorgen/json_struct.git
+    GIT_TAG 19a71df0df00da616865eb0a885627ccbe0ec5de
+)
+
+FetchContent_GetProperties(json_struct_lib)
+if(NOT json_struct_lib_POPULATED)
+    FetchContent_Populate(json_struct_lib)
+    add_subdirectory(${json_struct_lib_SOURCE_DIR} ${json_struct_lib_BINARY_DIR})
+endif()
+
+
+#OpenMP
+add_library(openmp INTERFACE)
+if(USE_OPENMP)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        message("Enabling openmp llvm extension")
+        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp:llvm")
+        target_compile_definitions(openmp INTERFACE -DOPENMP_AVAILABLE)
+    else()
+        find_package(OpenMP)
+        if(OpenMP_CXX_FOUND)
+        	message("OpenMP version ${OpenMP_CXX_VERSION}")
+            target_link_libraries(openmp INTERFACE OpenMP::OpenMP_CXX)
+            target_compile_definitions(openmp INTERFACE -DOPENMP_AVAILABLE)
+        else()
+            message("Disabling openmp")
+        endif()
+    endif()
+endif()
+
 add_subdirectory(libs)
 
 file(GLOB SOURCE_FILES ./src/*.cpp)
 add_executable(recon_3d src/tools/3D/main.cpp ${SOURCE_FILES})
 target_include_directories(recon_3d PRIVATE src)
 target_include_directories(recon_3d PUBLIC include)
-target_link_libraries(recon_3d PUBLIC eigen glm happly cereal::cereal nanoflann LowRankSVD)
+target_link_libraries(recon_3d PUBLIC eigen glm happly cereal::cereal nanoflann LowRankSVD openmp MeshReconstruction json_struct)
 target_compile_options(recon_3d PRIVATE "/bigobj")
 
 add_executable(recon_2d src/tools/2D/main.cpp ${SOURCE_FILES})
 target_include_directories(recon_2d PRIVATE src)
 target_include_directories(recon_2d PUBLIC include)
-target_link_libraries(recon_2d PUBLIC eigen glm happly cereal::cereal nanoflann LowRankSVD)
+target_link_libraries(recon_2d PUBLIC eigen glm happly cereal::cereal nanoflann LowRankSVD openmp)
 target_compile_options(recon_2d PRIVATE "/bigobj")
+
+add_library(recon_lib ${SOURCE_FILES})
+target_include_directories(recon_lib PRIVATE src)
+target_include_directories(recon_lib PUBLIC include)
+target_link_libraries(recon_lib PUBLIC eigen glm happly cereal::cereal nanoflann LowRankSVD openmp MeshReconstruction json_struct)
+target_compile_options(recon_lib PRIVATE "/bigobj")
 
 add_subdirectory(viewer)
