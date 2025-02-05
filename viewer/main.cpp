@@ -14,6 +14,8 @@
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include <args.hxx>
+#include "PointCloud.h"
+#include <numbers>
 
 class UiManager : public myrender::System
 {
@@ -114,6 +116,8 @@ public:
         mShader->setUniform("pixelToView", 2.0f * nearPlaneHalfSize / glm::vec2(mRenderTextureSize));
         mShader->setUniform("nearPlaneHalfSize", nearPlaneHalfSize);
         mShader->setUniform("nearAndFarPlane", nearAndFarPlane);
+        glm::mat4 viewModelMatrix = camera->getViewMatrix() * mTransform;
+        mShader->setUniform("invViewModelMatrix", glm::inverse(viewModelMatrix));
         
         // Dispatch
         glDispatchCompute(mRenderTextureSize.x/16, mRenderTextureSize.y/16, 1);
@@ -140,7 +144,8 @@ class BaseScene : public myrender::Scene
 {
 public:
     BaseScene(const std::string& meanFieldPath, 
-              std::optional<std::reference_wrapper<std::string>> mVarFieldPath = {}) 
+              std::optional<std::reference_wrapper<std::string>> mVarFieldPath = {},
+              std::optional<std::reference_wrapper<std::string>> pointsPath = {}) 
     {
         // Load mean Field
         auto msdf = sdflib::SdfFunction::loadFromFile(meanFieldPath);
@@ -158,7 +163,7 @@ public:
         msdf.release();
 
         // Load Var field
-        if(mVarFieldPath.has_value())
+        if(mVarFieldPath.has_value() && std::filesystem::exists(std::filesystem::path(mVarFieldPath->get())))
         {
             const std::string& vPath = mVarFieldPath.value();
             auto vsdf = sdflib::SdfFunction::loadFromFile(vPath);
@@ -175,19 +180,26 @@ public:
             mVarField = std::unique_ptr<sdflib::OctreeSdf>(static_cast<sdflib::OctreeSdf*>(vsdf.get()));
             vsdf.release();
         }
+
+        if(pointsPath.has_value() && std::filesystem::exists(std::filesystem::path(pointsPath->get())))
+        {
+            mCloud.readFromFile(pointsPath.value());
+        }
     }
 
 protected:
     std::unique_ptr<sdflib::OctreeSdf> mMeanOctree;
     std::unique_ptr<sdflib::OctreeSdf> mVarField;
+    PointCloud<3> mCloud;
 };
 
 class MyScene2 : public BaseScene
 {
 public:
     MyScene2(const std::string& meanFieldPath, 
-            std::optional<std::reference_wrapper<std::string>> mVarFieldPath = {}) : 
-                BaseScene(meanFieldPath, mVarFieldPath)
+            std::optional<std::reference_wrapper<std::string>> mVarFieldPath = {},
+            std::optional<std::reference_wrapper<std::string>> pointsPath = {}) : 
+                BaseScene(meanFieldPath, mVarFieldPath, pointsPath)
     { }
 
     void start() override
@@ -204,10 +216,10 @@ public:
         
         auto rsdf = createSystem<RenderSdf>("OctreeRender");
 
-        rsdf->setTransform(glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.5f, -0.5f)));
+        rsdf->setTransform(-glm::rotate(glm::mat4(1.0f), static_cast<float>(0.5 * std::numbers::pi), glm::vec3(1., 0., 0.)) * glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, -0.5f, -0.5f)));
         
-        // const float invSize = 1.0f / mMeanOctree->getGridBoundingBox().getSize().x;
-        rsdf->getShader()->setUniform("distanceScale", 1.0f / 32.0f);
+        const float invSize = 1.0f / mMeanOctree->getGridBoundingBox().getSize().x;
+        rsdf->getShader()->setUniform("distanceScale", invSize);
         rsdf->getShader()->setUniform("minBorderValue", mMeanOctree->getOctreeMinBorderValue());
         rsdf->getShader()->setUniform("startGridSize", glm::vec3(mMeanOctree->getStartGridSize()));
         rsdf->getShader()->setBufferData("sdfOctree", mMeanOctree->getOctreeData());
@@ -220,8 +232,9 @@ class MyScene : public BaseScene
 {
 public:
     MyScene(const std::string& meanFieldPath, 
-            std::optional<std::reference_wrapper<std::string>> mVarFieldPath = {}) : 
-                BaseScene(meanFieldPath, mVarFieldPath), 
+            std::optional<std::reference_wrapper<std::string>> mVarFieldPath = {},
+            std::optional<std::reference_wrapper<std::string>> pointsPath = {}) : 
+                BaseScene(meanFieldPath, mVarFieldPath, pointsPath), 
                 mCurrentProp(Property::SDF)
     { }
 
@@ -247,6 +260,21 @@ public:
         mSelectArea = mMeanOctree->getGridBoundingBox();
 
         auto uiMan = createSystem<UiManager>();
+
+        if(mCloud.size() > 0)
+        { // Create point cloud
+            auto myPoint = createSystem<mr::RenderMesh>();
+            myPoint->setVertexData(std::vector<mr::RenderMesh::VertexParameterLayout> {mr::RenderMesh::VertexParameterLayout(GL_FLOAT, 3)}, 
+                                   mCloud.getPoints().data(), mCloud.getPoints().size());
+            myPoint->setDrawMode(GL_POINT);
+            myPoint->setShader(mr::Shader::loadShader("BasicRender"));
+            myPoint->getShader().setUniform("outColor", glm::vec4(0.0, 0.0, 1.0, 1.0));
+            const glm::vec3 center = mMeanOctree->getGridBoundingBox().getCenter();
+            const glm::vec3 size = mMeanOctree->getGridBoundingBox().getSize();
+            myPoint->setTransform(glm::scale(glm::mat4(1.f), 1.0f / size) * glm::translate(glm::mat4(1.0f), -center));
+            glEnable(GL_PROGRAM_POINT_SIZE);
+            glPointSize(5);
+        }
 
         { // Create box
             auto myCube = mr::PrimitivesFactory::getCube();
@@ -287,7 +315,7 @@ public:
             if(mCurrentProp == SDF)
             {
                 uiMan->addSlider(mPlaneModel->getShader(), "linesSpace", "Isolines space", 0.1, 0.002, 0.5);
-                uiMan->addSlider(mPlaneModel->getShader(), "gridThickness", "Grid thickness", 0.01, 0.001, 0.02);
+                uiMan->addSlider(mPlaneModel->getShader(), "gridThickness", "Grid thickness", 0.001, 0.0001, 0.02);
                 uiMan->addSlider(mPlaneModel->getShader(), "linesThickness", "Isolines thickness", 2.5, 0.5, 6.0);
                 uiMan->addSlider(mPlaneModel->getShader(), "surfaceThickness", "Surface thickness", 2.5, 0.5, 6.0);
             }
@@ -443,8 +471,8 @@ int main(int argc, char** argv)
 {
     args::ArgumentParser parser("");
     args::HelpFlag help(parser, "help", "Display help menu", {'h', "help"});
-    args::Positional<std::string> meanFieldPath(parser, "mean_field", "Mean Field");
-    args::ValueFlag<std::string> varFieldPath(parser, "var_field", "Var Field", {"var_field"});
+    args::Positional<std::string> outputName(parser, "output_name", "Output name");
+    args::ValueFlag<uint32_t> sceneNum(parser, "scene", "Scene", {"scene"});
 
     try
     {
@@ -456,20 +484,26 @@ int main(int argc, char** argv)
         return 0;
     }
 
+    uint32_t sceneId = (sceneNum) ?  args::get(sceneNum) : 0;
+
     namespace mr = myrender;
     mr::ShaderProgramLoader::getInstance()->addSearchPath("./build/_deps/myrender_lib-src/shaders");
     mr::ShaderProgramLoader::getInstance()->addSearchPath("./viewer/shaders");
     mr::MainLoop ml;
+    // using MScene = MyScene2;
     using MScene = MyScene;
-    // using MScene = MyScene;
-    if(varFieldPath)
+    std::string meanFieldPath = "./output/" + args::get(outputName) + ".bin";
+    std::string varFieldPath = "./output/" + args::get(outputName) + "_var.bin";
+    std::string pointsPath = "./output/" + args::get(outputName) + "_input.ply";
+
+    if(sceneId == 0)
     {
-        MScene scene(args::get(meanFieldPath), args::get(varFieldPath));
+        MyScene scene(meanFieldPath, varFieldPath, pointsPath);
         ml.start(scene);
     }
     else
     {
-        MScene scene(args::get(meanFieldPath), std::nullopt);
+        MyScene2 scene(meanFieldPath, varFieldPath, pointsPath);
         ml.start(scene);
     }
 }

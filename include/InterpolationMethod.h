@@ -59,11 +59,11 @@ struct MultivariateLinearInterpolation
 
     static constexpr uint32_t NumSecondGrad = (Dim == 2) ? 1 : 3;
     static void evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) {}
-    static float factorSecondGradIntegGrad(vec nodeSize) {}
+    static double factorSecondGradIntegGrad(vec nodeSize) {}
 };
 
 template<>
-static float MultivariateLinearInterpolation<2>::factorSecondGradIntegGrad(vec nodeSize) 
+static double MultivariateLinearInterpolation<2>::factorSecondGradIntegGrad(vec nodeSize) 
 {
     return 1.0 / (nodeSize[0] * nodeSize[0]);
 }
@@ -90,7 +90,7 @@ static inline void MultivariateLinearInterpolation<2>::evalSecondGradIntegGrad(s
 }
 
 template<>
-static float MultivariateLinearInterpolation<3>::factorSecondGradIntegGrad(vec nodeSize) 
+static double MultivariateLinearInterpolation<3>::factorSecondGradIntegGrad(vec nodeSize) 
 {
     return 1.0 / nodeSize[0];
 }

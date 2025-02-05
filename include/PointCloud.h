@@ -133,7 +133,7 @@ bool PointCloud<3>::readFromFile(const std::string &filename, bool readVariance)
 	for(uint32_t i=0; i < xProp.size(); i++)
 	{
 		points[i] = glm::vec3(xProp[i], yProp[i], zProp[i]);
-		if(hasNormals) normals[i] = glm::vec3(nxProp[i], nyProp[i], nzProp[i]);
+		if(hasNormals) normals[i] = glm::normalize(glm::vec3(nxProp[i], nyProp[i], nzProp[i]));
 	}
 	
 	return true;

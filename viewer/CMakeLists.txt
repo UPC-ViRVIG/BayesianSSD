@@ -42,4 +42,4 @@ if(NOT args_lib_POPULATED)
 endif()
 
 add_executable(Viewer ./main.cpp)
-target_link_libraries(Viewer PUBLIC SdfLib MyRender args)
+target_link_libraries(Viewer PUBLIC SdfLib MyRender args recon_lib)

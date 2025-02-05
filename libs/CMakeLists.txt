@@ -6,7 +6,6 @@ cmake_minimum_required(VERSION 3.16)
 # pkg_check_modules(GSL REQUIRED IMPORTED_TARGET gsl)
 
 # Add gsl
-
 find_library(gsl_lib NAMES gsl.lib PATHS "$ENV{CONDA_PREFIX}/Library/lib/")
 
 if(gsl_lib)
