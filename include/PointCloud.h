@@ -10,6 +10,7 @@
 #include <nanoflann.hpp>
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
+#include <glm/gtc/quaternion.hpp>
 
 template<uint32_t Dim>
 class PointCloud
@@ -34,8 +35,9 @@ public:
 	
 	vec &normal(uint32_t index) { return normals[index]; }
 	const vec &normal(uint32_t index) const { return normals[index]; }
-	const vec& normalVarianceVec(uint32_t index) const { return normalsVar[index]; }
-	void computeNormals();
+	const Eigen::Matrix<double, Dim, Dim>& normalInvCovariance(uint32_t index) const { return normalsInvCov[index]; }
+	const std::tuple<Eigen::Matrix<double, Dim, Dim>, Eigen::Vector<double, Dim>>& normalInvCovarianceDes(uint32_t index) const { return normalsInvCovDes[index]; }
+	void computeNormals(float stdByDistance = 0);
 
 
 	template <class BBOX>
@@ -43,7 +45,9 @@ public:
 private:
 	std::vector<vec> points, normals;
 	std::vector<float> pointsVar;
-	std::vector<vec> normalsVar;
+	std::vector<Eigen::Matrix<double, Dim, Dim>> normalsInvCov;
+	std::vector<std::tuple<Eigen::Matrix<double, Dim, Dim>, Eigen::Vector<double, Dim>>> normalsInvCovDes;
+	std::vector<vec> normalsInvVar;
 };
 
 template<>
@@ -60,7 +64,7 @@ bool PointCloud<2>::readFromFile(const std::string &filename, bool readVariance)
 	points.resize(n);
 	normals.resize(n);
 	pointsVar.resize(n, 1.0f);
-	normalsVar.resize(n);
+	normalsInvCov.resize(n);
 	for(unsigned int i=0; i<n; i++)
 	{
 		fin >> v.x >> v.y;
@@ -74,14 +78,15 @@ bool PointCloud<2>::readFromFile(const std::string &filename, bool readVariance)
 			pointsVar[i] = val;
 		}
 	}
-	fin.close();
+	fin.close();	
 	
 	return true;
 }
 
 template<>
 bool PointCloud<3>::writeToFile(const std::string& filename) 
-{ 
+{
+	constexpr uint32_t Dim = 3;
 	happly::PLYData plyOut;
 
 	// Write pos
@@ -101,6 +106,26 @@ bool PointCloud<3>::writeToFile(const std::string& filename)
 	for(uint32_t i=0; i < size(); i++) tmp[i] = normals[i][2];
 	plyOut.getElement("vertex").addProperty("nz", tmp);
 
+	// Write points std
+	std::vector<float> noiseStd(size());
+	std::transform(pointsVar.begin(), pointsVar.end(), noiseStd.begin(), [](float a) { return glm::sqrt(a); });
+	plyOut.getElement("vertex").addProperty("noise_std", noiseStd);
+
+	// Write normals std
+	std::array<std::vector<float>, 3> normalsNoise;
+	normalsNoise.fill(std::vector<float>(size()));
+	for(uint32_t i=0; i < size(); i++)
+	{
+		vec invVar = normalsInvVar[i];
+
+		normalsNoise[0][i] = glm::sqrt(1.0 / invVar.x);
+		normalsNoise[1][i] = glm::sqrt(1.0 / invVar.y);
+		normalsNoise[2][i] = glm::sqrt(1.0 / invVar.z);
+	}
+	plyOut.getElement("vertex").addProperty("normal_noise_x", normalsNoise[0]);
+	plyOut.getElement("vertex").addProperty("normal_noise_y", normalsNoise[1]);
+	plyOut.getElement("vertex").addProperty("normal_noise_z", normalsNoise[2]);
+	
 	plyOut.write(filename);
 
 	return true;
@@ -125,31 +150,46 @@ bool PointCloud<3>::readFromFile(const std::string &filename, bool readVariance)
     std::vector<float> nyProp = hasNormals ? plyIn.getElement("vertex").getProperty<float>("ny") : std::vector<float>();
     std::vector<float> nzProp = hasNormals ? plyIn.getElement("vertex").getProperty<float>("nz") : std::vector<float>();
 
+	// Read point variance
+	if(plyIn.getElement("vertex").hasProperty("noise_std"))
+	{
+		pointsVar = plyIn.getElement("vertex").getProperty<float>("noise_std");
+	}
+	else
+	{
+		std::cout << "Point cloud does not have variance" << std::endl;
+		pointsVar.resize(xProp.size(), 1.0f);
+	}
+
 	points.resize(xProp.size());
 	normals.resize(xProp.size());
-	pointsVar.resize(xProp.size(), 1.0f);
-	normalsVar.resize(xProp.size());
+	normalsInvCov.resize(xProp.size());
+	normalsInvVar.resize(xProp.size());
+	normalsInvCovDes.resize(xProp.size());
 
 	for(uint32_t i=0; i < xProp.size(); i++)
 	{
 		points[i] = glm::vec3(xProp[i], yProp[i], zProp[i]);
 		if(hasNormals) normals[i] = glm::normalize(glm::vec3(nxProp[i], nyProp[i], nzProp[i]));
+		pointsVar[i] = pointsVar[i] * pointsVar[i]; // Pass std to var
 	}
 	
 	return true;
 }
 
 template<uint32_t Dim>
-void PointCloud<Dim>::computeNormals()
+void PointCloud<Dim>::computeNormals(float stdByDistance)
 {
 	using my_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud<Dim>>, PointCloud<Dim>, Dim /* dim */>;
 	my_kd_tree_t kdtree(Dim /* dim */, *this, {10 /* max depth */});
 
-	const size_t numNear = 5;
+	const size_t numNear = 20;
 	std::vector<uint32_t> nearIndexCache(numNear);
 	std::vector<float> nearDistSqrCache(numNear);
 	
-	Eigen::Matrix<float, Dim, Dim> nCovMat;
+	Eigen::Matrix<double, Dim, Dim> nCovMat;
+	uint32_t ignoredNormals = 0;
+	const double varByDistance = stdByDistance * stdByDistance;
 	for(uint32_t i=0; i < size(); i++)
 	{
 		const vec c = points[i];
@@ -157,27 +197,48 @@ void PointCloud<Dim>::computeNormals()
 		uint32_t numResults = kdtree.knnSearch(reinterpret_cast<const float*>(&c), numNear, nearIndexCache.data(), nearDistSqrCache.data());
 
 		// Compute covariance matrix
-		nCovMat = Eigen::Matrix<float, Dim, Dim>::Zero();
+		nCovMat = Eigen::Matrix<double, Dim, Dim>::Zero();
+		const double v1 = variance(i);
 		for(uint32_t j=0; j < numResults; j++)
 		{
+			if(nearIndexCache[j] == i) continue;
+			const double v2 = variance(nearIndexCache[j]);
 			const vec p = points[nearIndexCache[j]] - c;
-			const float var = variance(i) + variance(nearIndexCache[j]);
+			const double distVar = varByDistance * glm::dot(p, p);
+			const double cov = v1 * v2 * glm::sqrt(1.0/((distVar + v1) * (distVar + v2)));
+			const double invVar = 1.0 / (v1 + v2 + distVar - 2.0 * cov);
+			if(invVar < 0)
+			{
+				std::cout << "is negative " << invVar << " " << (v1+v2) << " " << (2.0 * cov) << " " << distVar << std::endl;
+			}
+			if(glm::isnan(invVar))
+			{
+				std::cout << "is nan" << std::endl;
+			}
 			for(uint32_t di = 0; di < Dim; di++)
 			{
 				for(uint32_t dj = 0; dj < Dim; dj++)
 				{
-					nCovMat(di, dj) += var * p[di] * p[dj];
+					nCovMat(di, dj) += invVar * static_cast<double>(p[di] * p[dj]);
 				}
 			}
+
+			// std::cout << p.x << ", " << p.y << ", " << p.z << ", ";
 		}
+		// std::cout << std::endl;
+		// for(uint32_t j=0; j < numResults; j++)
+		// {
+		// 	std::cout << variance(i) + variance(nearIndexCache[j]) << ", ";
+		// }
+		// std::cout << std::endl;
 
 		// Compute best normal
-		Eigen::SelfAdjointEigenSolver<Eigen::Matrix<float, Dim, Dim>> eigenSolver;
+		Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, Dim, Dim>> eigenSolver;
 		eigenSolver.compute(nCovMat, Eigen::DecompositionOptions::ComputeEigenvectors);
-		Eigen::Vector3f eigenValues = eigenSolver.eigenvalues();
+		Eigen::Matrix<double, Dim, 1> eigenValues = eigenSolver.eigenvalues();
 
 		uint32_t minIndex = 0;
-		float minValue = glm::abs(eigenValues(0));
+		double minValue = glm::abs(eigenValues(0));
 		for(uint32_t d=1; d < Dim; d++)
 		{
 			if(glm::abs(eigenValues(d)) < minValue)
@@ -186,18 +247,45 @@ void PointCloud<Dim>::computeNormals()
 			}
 		}
 
-		auto minVec = eigenSolver.eigenvectors().col(minIndex);
+		Eigen::Matrix<double, Dim, Dim> eigenVectors = eigenSolver.eigenvectors();
+		auto minVec = eigenVectors.col(minIndex);
 		vec newNormal;
-		for(uint32_t d=0; d < Dim; d++) newNormal[d] = minVec(d);
+		for(uint32_t d=0; d < Dim; d++) newNormal[d] = static_cast<float>(minVec(d));
 		newNormal = glm::normalize(newNormal);
 
 		// Flip normals
 		if(glm::dot(newNormal, normals[i]) >= 0.0) normals[i] = newNormal;
 		else normals[i] = -newNormal;
 
-		// TODO: compute variance
-		for(uint32_t d=0; d < Dim; d++) normalsVar[i][d] = 1.0f;
+		// Compute covariance
+		double sumVar = 0.0;
+		for(uint32_t d=1; d < Dim; d++)
+		{
+			sumVar += 1.0 / eigenValues((minIndex + d) % Dim);
+		}
+		if(sumVar > 0.99) // Ignore this normal
+		{
+			if(ignoredNormals < 50) std::cout << sumVar << std::endl;
+			normalsInvCov[i] = Eigen::Matrix<double, Dim, Dim>::Zero();
+			ignoredNormals++;
+		}
+		else
+		{
+			const double sumVar4 = glm::min(4 * sumVar, 1.0);
+			double a = glm::max((1.0 - glm::sqrt(1-sumVar4)) / (sumVar4), 0.503);
+			eigenValues(minIndex) = 1.0 / ((2.*a-1.)*sumVar);
+			normalsInvCov[i] = eigenVectors * eigenValues.asDiagonal() * eigenVectors.transpose();
+			normalsInvVar[i] = vec(eigenValues((minIndex+1)%Dim), eigenValues((minIndex+2)%Dim), eigenValues(minIndex));
+			Eigen::Matrix<double, Dim, Dim> oEigenVectors;
+			Eigen::Vector<double, Dim> oEigenValues;
+			for(uint32_t d=0; d < Dim; d++) {
+				oEigenVectors.col(d) = eigenVectors.col((minIndex+d+1)%Dim);
+				oEigenValues(d) = eigenValues((minIndex+d+1)%Dim);
+			}
+			normalsInvCovDes[i] = std::make_tuple(oEigenVectors.transpose(), oEigenValues);
+		}
 	}
+	std::cout << "Num ignored normals " << ignoredNormals << std::endl;
 }
 
 #endif
