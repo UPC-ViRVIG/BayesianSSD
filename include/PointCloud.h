@@ -37,7 +37,7 @@ public:
 	const vec &normal(uint32_t index) const { return normals[index]; }
 	const Eigen::Matrix<double, Dim, Dim>& normalInvCovariance(uint32_t index) const { return normalsInvCov[index]; }
 	const std::tuple<Eigen::Matrix<double, Dim, Dim>, Eigen::Vector<double, Dim>>& normalInvCovarianceDes(uint32_t index) const { return normalsInvCovDes[index]; }
-	void computeNormals(float stdByDistance = 0);
+	void computeNormals(float stdByDistance = 0, bool useCovariances=false);
 
 
 	template <class BBOX>
@@ -178,7 +178,7 @@ bool PointCloud<3>::readFromFile(const std::string &filename, bool readVariance)
 }
 
 template<uint32_t Dim>
-void PointCloud<Dim>::computeNormals(float stdByDistance)
+void PointCloud<Dim>::computeNormals(float stdByDistance, bool useCovariances)
 {
 	using my_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud<Dim>>, PointCloud<Dim>, Dim /* dim */>;
 	my_kd_tree_t kdtree(Dim /* dim */, *this, {10 /* max depth */});
@@ -190,6 +190,8 @@ void PointCloud<Dim>::computeNormals(float stdByDistance)
 	Eigen::Matrix<double, Dim, Dim> nCovMat;
 	uint32_t ignoredNormals = 0;
 	const double varByDistance = stdByDistance * stdByDistance;
+	Eigen::Matrix<double, numNear, numNear> pCovMat; 
+	Eigen::Matrix<double, numNear, Dim> P; 
 	for(uint32_t i=0; i < size(); i++)
 	{
 		const vec c = points[i];
@@ -198,6 +200,8 @@ void PointCloud<Dim>::computeNormals(float stdByDistance)
 
 		// Compute covariance matrix
 		nCovMat = Eigen::Matrix<double, Dim, Dim>::Zero();
+		pCovMat = Eigen::Matrix<double, numNear, numNear>::Zero();
+		P = Eigen::Matrix<double, numNear, Dim>::Zero();
 		const double v1 = variance(i);
 		for(uint32_t j=0; j < numResults; j++)
 		{
@@ -206,31 +210,55 @@ void PointCloud<Dim>::computeNormals(float stdByDistance)
 			const vec p = points[nearIndexCache[j]] - c;
 			const double distVar = varByDistance * glm::dot(p, p);
 			const double cov = v1 * v2 * glm::sqrt(1.0/((distVar + v1) * (distVar + v2)));
-			const double invVar = 1.0 / (v1 + v2 + distVar - 2.0 * cov);
-			if(invVar < 0)
+			if(useCovariances)
 			{
-				std::cout << "is negative " << invVar << " " << (v1+v2) << " " << (2.0 * cov) << " " << distVar << std::endl;
+				for(uint32_t d = 0; d < Dim; d++) P(j, d) = p[d];
+				pCovMat(j, j) = v1 + v2 + distVar - 2.0 * cov;
 			}
-			if(glm::isnan(invVar))
+			else
 			{
-				std::cout << "is nan" << std::endl;
-			}
-			for(uint32_t di = 0; di < Dim; di++)
-			{
-				for(uint32_t dj = 0; dj < Dim; dj++)
+				const double invVar = 1.0 / (v1 + v2 + distVar - 2.0 * cov);
+				for(uint32_t di = 0; di < Dim; di++)
 				{
-					nCovMat(di, dj) += invVar * static_cast<double>(p[di] * p[dj]);
+					for(uint32_t dj = 0; dj < Dim; dj++)
+					{
+						nCovMat(di, dj) += invVar * static_cast<double>(p[di] * p[dj]);
+					}
 				}
 			}
-
-			// std::cout << p.x << ", " << p.y << ", " << p.z << ", ";
 		}
-		// std::cout << std::endl;
-		// for(uint32_t j=0; j < numResults; j++)
-		// {
-		// 	std::cout << variance(i) + variance(nearIndexCache[j]) << ", ";
-		// }
-		// std::cout << std::endl;
+
+		// Compute covariancies between points
+		if(useCovariances)
+		{
+			for(uint32_t j=0; j < numResults; j++)
+			{
+				const double vj = pCovMat(j, j);
+				for(uint32_t k=0; k < numResults; k++)
+				{
+					if(j == k) continue;
+					const vec p = points[nearIndexCache[j]] - points[nearIndexCache[k]];
+					const double distVar = varByDistance * glm::dot(p, p);
+					const double vk = pCovMat(k, k);
+					const double cov = vj * vk * glm::sqrt(1.0/((distVar + vj) * (distVar + vk)));
+					pCovMat(j, k) = cov;
+				}
+			}
+		}
+
+		// Compute inv cov
+		if(useCovariances)
+		{
+			Eigen::BDCSVD<Eigen::MatrixXd> svd(pCovMat, Eigen::ComputeThinU | Eigen::ComputeThinV);
+			Eigen::VectorXd sv = svd.singularValues();
+			for(uint32_t i=0; i < sv.size(); i++)
+			{
+				if(glm::abs(sv(i)) > 1e-8) sv(i) = 1.0 / sv(i);
+				else sv(i) = 0.0;
+			}
+			Eigen::Matrix<double, numNear, numNear> pInvCovMat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
+			nCovMat = P.transpose() * pInvCovMat * P;
+		}
 
 		// Compute best normal
 		Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, Dim, Dim>> eigenSolver;
