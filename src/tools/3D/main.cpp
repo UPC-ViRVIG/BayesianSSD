@@ -115,7 +115,6 @@ int main(int argc, char *argv[])
 		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::BASE_RED
 	};
 
-	Timer timer;
 	timer.start();
 
 	NodeTree<3> octree;
