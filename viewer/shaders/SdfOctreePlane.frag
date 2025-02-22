@@ -21,6 +21,8 @@ uniform float linesSpace = 0.03;
 uniform bool printGrid = true;
 uniform bool printIsolines = true;
 
+uniform float distanceScale;
+
 void main()
 {
     vec3 distToBox = abs(gridPosition - vec3(0.5));
@@ -48,8 +50,8 @@ void main()
 
     // Heat map color
     vec3 finalColor = getSdfPaletteColor(0.5 + 0.5 * dist / octreeValueRange);
-    vec3 grad = 1.0 / 32.0 * getGradient(gridPosition);
-    finalColor = (length(grad) > 1.0) ? vec3(1.0, 0.0, 0.0) : vec3(1-length(grad), 1.0, 1-length(grad));
+    vec3 grad = distanceScale * getGradient(gridPosition);
+    finalColor = (length(grad) > 1.0) ? vec3(1.0, clamp(length(grad)-1., 0., 1.), clamp(length(grad)-1., 0., 1.)) : vec3(1-length(grad), 1.0, 1-length(grad));
 
     fragColor = vec4(mix(finalColor, vec3(0.0, 0.0, 0.0), max(max(surfaceColorWeight, gridColorWeight), linesColorWeight)), 1.0);
 }

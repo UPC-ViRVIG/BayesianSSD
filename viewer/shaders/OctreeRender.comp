@@ -44,14 +44,17 @@ vec3 mapColor(vec3 pos, vec3 cameraPos)
     F0 = mix(F0, albedo, metallic);
 
     vec3 Lo = vec3(0.0);
+    vec3 lightsPos[2] = vec3[2](lightPos, cameraPos);
+    float lightsIntensity[2] = float[2](1.0, 0.3);
     // Directional light
+    for(int i=0; i < 2; i++)
     {
         // Light position
-        float distToLight = length(lightPos - pos);
+        float distToLight = length(lightsPos[i] - pos);
 
-        vec3 L = normalize(lightPos - pos);
+        vec3 L = normalize(lightsPos[i] - pos);
         vec3 H = normalize(V + L);
-        float intensity = 1.0;
+        float intensity = lightsIntensity[i];
         vec3 radiance = sunColor * intensity;
         
         // Cook-torrance brdf
@@ -89,7 +92,7 @@ float map(vec3 pos)
     if(max(max(distToBox.x, distToBox.y), distToBox.z) > 0.4999)
     {
         // return length(max(distToBox - vec3(0.5), vec3(0.0))) + distanceScale * minBorderValue; 
-        return length(max(distToBox - vec3(0.5), vec3(0.0))) + 0.001;
+        return length(max(distToBox - vec3(0.5), vec3(0.0))) + 0.01;
     }
     return distanceScale * getDistance(pos, distToGrid, nodeRelativeLength);
 }
@@ -108,8 +111,7 @@ bool raycast(vec3 startPos, vec3 dir, out vec3 resultPos)
         accDistance += dist;
         it += 1;
     }
-    // return lastDistance <= 1e-5;
-    return accDistance < nearAndFarPlane.y;
+    return lastDistance <= 1e-5;
 }
 
 void main()
