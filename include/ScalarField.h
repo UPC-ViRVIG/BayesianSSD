@@ -39,7 +39,7 @@ public:
 	float eval(vec point) const
 	{
 		using Inter = MultivariateLinearInterpolation<Dim>;
-		std::optional<NodeTree<Dim>::Node> node;
+		std::optional<typename NodeTree<Dim>::Node> node;
 		nodeTree.getNode(point, node);
 		if(!node)
 		{
@@ -60,7 +60,7 @@ public:
 	vec evalGrad(vec point) const override
 	{
 		using Inter = MultivariateLinearInterpolation<Dim>;
-		std::optional<NodeTree<Dim>::Node> node;
+		std::optional<typename NodeTree<Dim>::Node> node;
 		nodeTree.getNode(point, node);
 		if(!node)
 		{
@@ -228,7 +228,7 @@ public:
 	float eval(vec point) const
 	{
 		using Inter = BicubicInterpolation;
-		std::optional<NodeTree<Dim>::Node> node;
+		std::optional<typename NodeTree<Dim>::Node> node;
 		nodeTree.getNode(point, node);
 		if(!node)
 		{
@@ -253,7 +253,7 @@ public:
 	vec evalGrad(vec point) override
 	{
 		using Inter = BicubicInterpolation;
-		std::optional<NodeTree<Dim>::Node> node;
+		std::optional<typename NodeTree<Dim>::Node> node;
 		nodeTree.getNode(point, node);
 		if(!node)
 		{
@@ -304,7 +304,7 @@ public:
 		vValues.resize(nodeTree.getNumVertices());
 		for(uint32_t i=0; i < nodeTree.getNumVertices(); i++)
 		{
-			std::optional<NodeTree<Dim>::Node> node;
+			std::optional<typename NodeTree<Dim>::Node> node;
 			vec vPos = nodeTree.getVertices()[i];
 			srcTree.nodeTree.getNode(vPos, node);
 			if(node)

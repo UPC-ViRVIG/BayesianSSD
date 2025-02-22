@@ -62,7 +62,7 @@ struct MultivariateLinearInterpolation
 };
 
 template<>
-static inline void MultivariateLinearInterpolation<2>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
+inline void MultivariateLinearInterpolation<2>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
 {
     const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
     outWeights[0][0] = invSizeSq;
@@ -72,7 +72,7 @@ static inline void MultivariateLinearInterpolation<2>::evalSecondGradInteg(vec n
 }
 
 template<>
-static inline void MultivariateLinearInterpolation<3>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
+inline void MultivariateLinearInterpolation<3>::evalSecondGradInteg(vec nodeSize, std::array<std::array<float, NumControlPoints>, NumSecondGrad>& outWeights) 
 {
     const float invSizeSq = 1.0f / (nodeSize[0] * nodeSize[0]);
     //dx dy

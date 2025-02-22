@@ -55,8 +55,9 @@ int main(int argc, char *argv[])
         .gradientWeight = 1.0f/0.5f,
         // .smoothWeight = 1.0f/150.0f,
 		.smoothWeight = 1.0f/10.f,
-		.algorithm = SmoothSurfaceReconstruction::Algorithm::FULL,
-		.computeVariance = true
+		.algorithm = SmoothSurfaceReconstruction::Algorithm::VAR,
+		.computeVariance = true,
+		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL
 	};
 
 	Timer timer;
