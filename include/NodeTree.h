@@ -23,7 +23,6 @@ template<uint32_t Dim>
 class NodeTree
 {
 public:
-    static constexpr uint32_t Dim = Dim;
     using vec = VStruct<Dim>::type;
     static constexpr uint32_t NumNeighboursVert = 2 * Dim;
     static constexpr uint32_t NumAdjacentNodes = 1 << Dim;

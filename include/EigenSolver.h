@@ -3,6 +3,10 @@
 
 #include <Eigen/Sparse>
 #include <Eigen/IterativeLinearSolvers>
+#ifdef PETSC_AVAILABLE
+#include <petscksp.h>
+#endif 
+
 
 namespace EigenSolver
 {
@@ -83,6 +87,93 @@ namespace EigenSolver
             tol_error = glm::sqrt(residualNorm2 / rhsNorm2);
             iters = i;
         }
+
+#ifdef PETSC_AVAILABLE
+        static void initPetsc()
+        {
+            char ** args;
+            int argc = 0;
+            // PetscFunctionBeginUser;
+            PetscCallVoid(PetscInitialize(&argc, &args, NULL, NULL));
+        }
+
+        static void closePetsc()
+        {
+            PetscCallVoid(PetscFinalize());
+        } 
+
+        template<typename TA, typename TB, typename TR>
+        static void solveGPU(TA& emat, TB& eb, TR& ex)
+        {
+            initPetsc();
+            if(sizeof(PetscScalar) != 8)
+            {
+                std::cout << "Petsc does not uses doubles" << std::endl;
+            } 
+
+            Mat A; Vec b; Vec x;
+            // Set vector x
+            PetscCallVoid(VecCreate(PETSC_COMM_SELF, &x));
+            PetscCallVoid(VecSetType(x, VECCUDA));
+            PetscCallVoid(VecSetSize(x, ex.rows(), ex.rows()));
+            PetscCallVoid(VecSetFromOptions(x));
+
+            PetscScalar* xArrayPtr;
+            PetscCallVoid(VecGetArray(x, &xArrayPtr));
+            PetscCallVoid(PetscArraycpy(xArrayPtr, ex.data(), ex.rows() * sizeof(PetscScalar)));
+
+            // Set vector b
+            PetscCallVoid(VecCreate(PETSC_COMM_SELF, &b));
+            PetscCallVoid(VecSetType(b, VECCUDA));
+            PetscCallVoid(VecSetSize(b, eb.rows(), eb.rows()));
+            PetscCallVoid(VecSetFromOptions(b));
+
+            PetscScalar* bArrayPtr;
+            PetscCallVoid(VecGetArray(b, &bArrayPtr));
+            PetscCallVoid(PetscArraycpy(bArrayPtr, eb.data(), eb.rows() * sizeof(PetscScalar)));
+            
+            // Set mat A
+            PetscCallVoid(MatCreateSeqAIJ(PETSC_COMM_SELF, emat.rows(), emat.cols(), 27, NULL, &A));
+            PetscCallVoid(MatSetType(A, MATAIJCUSPARSE));
+            PetscCallVoid(MatSetFromOptions(A));
+            
+            for (int k=0; k<emat.outerSize(); ++k) 
+            {
+                for (Eigen::SparseMatrix<double>::InnerIterator it(emat, k); it; ++it) 
+                {
+                    PetscInt row = it.row();    // row index
+                    PetscInt col = it.col();    // col index
+                    PetscScalar value = it.value();  // the value
+
+                    PetscCallVoid(MatSetValues(A, 1, &row, 1, &col, &value, INSERT_VALUES));
+                }
+            }
+
+            PetscCallVoid(MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY));
+            PetscCallVoid(MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY));
+
+            // Call solver            
+            KSP kspSolver;
+            PetscCallVoid(KSPCreate(PETSC_COMM_SELF, &kspSolver));
+            PetscCallVoid(KSPSetType(kspSolver, KSPCG));
+            PetscCallVoid(KSPSetOperators(kspSolver, A, A));
+            PetscCallVoid(KSPSetFromOptions(kspSolver));
+            PetscCallVoid(KSPSolve(kspSolver, b, x));
+            PetscInt numIter;
+            KSPGetIterationNumber(kspSolver, &numIter);
+            std::cout << "Num Iterations: " << numIter << std::endl;
+
+            KSPDestroy(&kspSolver);
+
+            // Get result
+
+
+            // Free matrices
+            // TODO
+
+            closePetsc();
+        }
+#endif 
     };
 
     struct GD
