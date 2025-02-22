@@ -63,13 +63,13 @@ struct MultivariateLinearInterpolation
 };
 
 template<>
-static double MultivariateLinearInterpolation<2>::factorSecondGradIntegGrad(vec nodeSize) 
+inline double MultivariateLinearInterpolation<2>::factorSecondGradIntegGrad(vec nodeSize) 
 {
     return 1.0 / (nodeSize[0] * nodeSize[0]);
 }
 
 template<>
-static inline void MultivariateLinearInterpolation<2>::evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) 
+inline void MultivariateLinearInterpolation<2>::evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) 
 {
     values[0][0] = 4.0;
     values[0][1] = -4.0;
@@ -90,13 +90,13 @@ static inline void MultivariateLinearInterpolation<2>::evalSecondGradIntegGrad(s
 }
 
 template<>
-static double MultivariateLinearInterpolation<3>::factorSecondGradIntegGrad(vec nodeSize) 
+inline double MultivariateLinearInterpolation<3>::factorSecondGradIntegGrad(vec nodeSize) 
 {
     return 1.0 / nodeSize[0];
 }
 
 template<>
-static inline void MultivariateLinearInterpolation<3>::evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) 
+inline void MultivariateLinearInterpolation<3>::evalSecondGradIntegGrad(std::array<std::array<float, NumControlPoints>, NumControlPoints>& values) 
 {
     values[0][0] = 4.;
     values[0][1] = -2.;
