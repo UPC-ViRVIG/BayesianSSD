@@ -74,7 +74,10 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	// cloud.computeNormals();
+	Timer timer;
+	timer.start();
+	cloud.computeNormals(0.5);
+	std::cout << "Time computing normals: " << timer.getElapsedSeconds() << std::endl;
 
     glm::vec3 min(INFINITY);
     glm::vec3 max(-INFINITY);
