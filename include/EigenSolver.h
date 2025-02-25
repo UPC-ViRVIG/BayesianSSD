@@ -27,7 +27,7 @@ namespace EigenSolver
         template<typename TA, typename TB, typename TR>
         static void solve(TA& matrixA, TB& vectorB, TR& result)
         {
-            Eigen::ConjugateGradient<Eigen::SparseMatrix<double>> solver;
+            Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper> solver;
             solver.compute(matrixA);
             result = solver.solveWithGuess(vectorB, result);
             std::cout << "Num Iterations: " << solver.iterations() << std::endl;

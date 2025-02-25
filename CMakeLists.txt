@@ -141,4 +141,12 @@ if(MSVC)
     target_compile_options(recon_2d PRIVATE "/bigobj")
 endif()
 
+add_library(recon_lib STATIC ${SOURCE_FILES})
+target_include_directories(recon_lib PRIVATE src)
+target_include_directories(recon_lib PUBLIC include)
+target_link_libraries(recon_lib PUBLIC eigen glm happly cereal::cereal nanoflann LowRankSVD openmp MeshReconstruction json_struct petsc)
+if(MSVC)
+    target_compile_options(recon_lib PRIVATE "/bigobj")
+endif()
+
 add_subdirectory(viewer)
