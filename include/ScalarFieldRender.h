@@ -62,7 +62,18 @@ namespace ScalarFieldRender
                 float mainIsolineWeight = 0.0f;
                 if(mainIsolineThickness > 0.0f)
                 {
-                    const float isoDist = glm::abs(fval - mainIsolineValue) * invSizeMag;
+                    glm::vec2 nPos = pos;
+                    float isoDist = fval;
+                    float cVal = fval;
+                    for(uint32_t i=0; i < 5 && glm::abs(cVal) > 1e-10f; i++)
+                    {
+                        glm::vec2 grad = scalarField.evalGrad(nPos);
+                        nPos -= grad * cVal;
+                        cVal = scalarField.eval(nPos);
+                        isoDist += cVal;
+                    }
+
+                    isoDist = glm::abs(isoDist - mainIsolineValue) * invSizeMag;
                     const float nDist = isoDist / (0.5f * glm::sqrt(2.0f) * mainIsolineThickness);
                     mainIsolineWeight = glm::clamp(1.0 - glm::pow(nDist, 12), 0.0, 1.0);
                 }

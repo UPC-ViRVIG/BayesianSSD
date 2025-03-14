@@ -350,9 +350,10 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
     std::function<void(NodeInfo&, const Points&)> createNode;
     createNode = [&](NodeInfo& nodeInfo, const Points& nodePoints) -> void
     {
-        if(nodeInfo.depth < maxDepth && nodePoints.size() > 0) // Create childrens
+        // if(nodeInfo.depth < 6 || (nodeInfo.depth < maxDepth && nodePoints.size() > 0)) // Create childrens
         // if(nodeInfo.depth < maxDepth) // Create childrens
         // if (nodeInfo.depth < maxDepth && rand() % (2 * maxDepth) > nodeInfo.depth || nodeInfo.depth < 2)
+        if(nodeInfo.depth < maxDepth && nodePoints.size() > 0) // Create childrens
         {
             const uint32_t chIndex = octreeData.size();
             octreeData.resize(octreeData.size() + numNodes);

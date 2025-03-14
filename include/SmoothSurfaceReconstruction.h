@@ -82,6 +82,7 @@ namespace SmoothSurfaceReconstruction
     {
         float posWeight;
         float gradientWeight;
+        float gradientXYWeight;
         float smoothWeight;
         Algorithm algorithm;
         bool computeVariance;
@@ -226,7 +227,8 @@ namespace SmoothSurfaceReconstruction
         EigenSparseMatrix gradientMatrix(numUnknows);
         EigenVector gradientVector;
         EigenSparseMatrix gradientInvCovMatrix(Dim * cloud.size());
-
+        float invVarGradient = config.gradientWeight * config.gradientWeight;
+        float invVarXYGradient = config.gradientXYWeight * config.gradientXYWeight;
         // Generate point equations
         for(uint32_t p = 0; p < cloud.size(); p++)
 	    {
@@ -263,12 +265,17 @@ namespace SmoothSurfaceReconstruction
                 gradientMatrix.endEquation();
             }
 
-            auto covMat = cloud.normalInvCovariance(p);
+            const std::tuple<Eigen::Matrix<double, Dim, Dim>, Eigen::Vector<double, Dim>>& nData = cloud.normalInvCovarianceDes(p);
+            Eigen::Vector<double, Dim> normInvCov = std::get<1>(nData);
+            normInvCov(Dim-1) = normInvCov(Dim-1) * invVarGradient;
+            for(uint32_t j=0; j < Dim-1; j++) normInvCov(j) = normInvCov(j) * invVarXYGradient;
+            Eigen::Matrix<double, Dim, Dim> covMat = std::get<0>(nData).transpose() * normInvCov.asDiagonal() * std::get<0>(nData);
+            // auto covMat1 = cloud.normalInvCovariance(p);
             for(uint32_t j=0; j < Dim; j++)
             {
                 for(uint32_t i=0; i < Dim; i++)
                 {
-                    gradientInvCovMatrix.addTerm(3*p + j, 3*p + i, covMat(j, i));
+                    gradientInvCovMatrix.addTerm(Dim*p + j, Dim*p + i, covMat(j, i));
                 }
             }
         }
@@ -396,25 +403,90 @@ namespace SmoothSurfaceReconstruction
         }
 
         Eigen::SparseMatrix<double> P = pointsMatrix.getMatrix();
+        pointsMatrix = EigenSparseMatrix(0, 0); // Free memory
         auto covP = pointsCovVector.getVector();
 
         Eigen::SparseMatrix<double> N = gradientMatrix.getMatrix();
+        gradientMatrix = EigenSparseMatrix(0, 0); // Free memory
         Eigen::SparseMatrix<double> iCovN = gradientInvCovMatrix.getMatrix();
-        float invVarGradient = config.gradientWeight * config.gradientWeight;
+        gradientInvCovMatrix = EigenSparseMatrix(0, 0); // Free memory
 
         Eigen::SparseMatrix<double> S1 = smoothMatrix1.getMatrix();
+        smoothMatrix1 = EigenSparseMatrix(0, 0); // Free memory
         auto fS1 = smoothFactor1.getVector();
         Eigen::SparseMatrix<double> S2 = smoothMatrix2.getMatrix();
+        smoothMatrix2 = EigenSparseMatrix(0, 0); // Free memory
         auto fS2 = smoothFactor2.getVector();
         Eigen::SparseMatrix<double> S3 = smoothMatrix3.getMatrix();
+        smoothMatrix3 = EigenSparseMatrix(0, 0); // Free memory
         Eigen::SparseMatrix<double> dS = S1.transpose() * fS1.asDiagonal() * S1 + S2.transpose() * fS2.asDiagonal() * S2 + S3;
+        S1 = Eigen::SparseMatrix<double>(); S2 = Eigen::SparseMatrix<double>(); S3 = Eigen::SparseMatrix<double>();
         float invVarSmoothing = config.smoothWeight * config.smoothWeight;
 
-        Eigen::VectorXd b = invVarGradient * N.transpose() * iCovN * gradientVector.getVector();
-        Eigen::SparseMatrix<double> A = P.transpose() * covP.asDiagonal().inverse() * P + invVarGradient * N.transpose() * iCovN * N + invVarSmoothing * dS;
+        invVarGradient = 1.0;
+        Eigen::VectorXd b = invVarGradient * N.transpose() * iCovN * gradientVector.getVector() / 35.0;
+        Eigen::SparseMatrix<double> A = P.transpose() * covP.asDiagonal().inverse() * P / 35.0 + invVarGradient * N.transpose() * iCovN * N / 35.0 + invVarSmoothing * dS;
         // Eigen::SparseMatrix<double> A = P.transpose() * covP.asDiagonal().inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * (S.transpose() * S);
-
         std::cout << "Time setting the problem: " << timer.getElapsedSeconds() << std::endl;
+
+        std::vector<double> unknownsValues(numUnknows, 1.0f);
+
+        std::cout << "Matrix: " << A.rows() << " x " << A.cols() << std::endl;
+        std::cout << "Sparsity: " << A.nonZeros() << " / " << A.cols() * A.rows() << std::endl;
+        
+        timer.start();
+
+        unknownsValues = std::vector<double>(numUnknows, 0.0f);
+        auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
+
+        // EigenSolver::BiCGSTAB::solve(A, b, x);
+        EigenSolver::CG::solve(A, b, x);
+
+        // std::cout << "Smooth value" << (dS * x).sum() << std::endl;
+        Eigen::VectorXd Px = P * x;
+        Eigen::VectorXd Nx = N * x;
+        double xPx = 0.0; 
+        for(uint32_t i=0; i < Px.rows(); i++)
+        {
+            const double v = Px(i);
+            xPx += glm::sqrt(v * v / covP(i));
+        }
+        xPx = xPx / static_cast<double>(Px.rows());
+        Eigen::Vector<double, Dim> xNxD = Eigen::Vector<double, Dim>::Zero();
+        double meanMag = 0.0f;
+        for(uint32_t i=0; i < Nx.rows(); i+=Dim)
+        {
+            Eigen::Vector<double, Dim> g;
+            for(uint32_t d=0; d < Dim; d++) g(d) = Nx(i+d);
+            meanMag += g.squaredNorm();
+            auto& icovT = cloud.normalInvCovarianceDes(i/3);
+            g = std::get<0>(icovT) * g;
+            for(uint32_t d=0; d < Dim; d++) 
+            {
+                const double sq = invVarGradient * std::get<1>(icovT)(d) * g(d) * g(d);
+                xNxD(d) += glm::sqrt(sq);
+            }
+        }
+        std::cout << meanMag / static_cast<double>(Nx.rows()/Dim) << std::endl;
+        std::cout << xPx << std::endl;
+        if(Dim == 3)
+        {
+            std::cout << (0.5 * (xNxD(0) + xNxD(1)) / static_cast<double>(Nx.rows()/Dim)) << std::endl;
+            std::cout << xNxD(2) / static_cast<double>(Nx.rows()/Dim) << std::endl;
+        }
+        if(Dim == 2)
+        {
+            std::cout << xNxD(0) / static_cast<double>(Nx.rows()/Dim) << std::endl;
+            std::cout << xNxD(1) / static_cast<double>(Nx.rows()/Dim) << std::endl;
+        }
+        std::cout << invVarSmoothing * x.transpose() * dS * x << std::endl;
+        std::cout << "Time solving problem: " << timer.getElapsedSeconds() << std::endl;
+
+        P = Eigen::SparseMatrix<double>();
+        N = Eigen::SparseMatrix<double>();
+        dS = Eigen::SparseMatrix<double>();
+
+        timer.start();
 
         Eigen::VectorXd CovX;
         if(config.computeVariance)
@@ -423,7 +495,7 @@ namespace SmoothSurfaceReconstruction
             using RowMMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
             RowMMatrixXd invSVDmat;
             Eigen::MatrixXd conv;
-            const uint32_t K=512;
+            const uint32_t K=1024;
             switch(config.invAlgorithm)
             {
                 case FULL:
@@ -599,7 +671,18 @@ namespace SmoothSurfaceReconstruction
                     }
                     break;
                 case BAYESIAN:
-                    CovX = invSVDmat.diagonal();
+                    if(config.invAlgorithm == BASE_RED)
+                    {
+                        Eigen::MatrixXd svdC = invSVDmat * conv.transpose();
+                        for(uint32_t i=0; i < numUnknows; i++) // Compute only the diagonal
+                        {
+                            CovX(i) = conv.row(i).dot(svdC.col(i));
+                        }
+                    }
+                    else
+                    {
+                        CovX = invSVDmat.diagonal();
+                    }
                     break;
                 case GP:
                     // CovX = invSVDmat - invSVDmat * mP.transpose() * mCovP.inverse() * mP * invSVDmat.transpose() + invSVDmat * mN.transpose() * invVarGradient * mN * invSVDmat.transpose();
@@ -609,70 +692,6 @@ namespace SmoothSurfaceReconstruction
 
             std::cout << "Time computing covariance: " << timer.getElapsedSeconds() << std::endl;
         }
-        
-        std::vector<double> unknownsValues(numUnknows, 1.0f);
-        // { // Test mul performance
-        //     auto a = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
-        //     // Eigen::VectorXd a = Eigen::VectorXd::Ones(numUnknows);
-        //     Eigen::VectorXd b = Eigen::VectorXd::Ones(numUnknows);
-        //     const uint32_t numIt = 1000; 
-        //     timer.start();
-        //     for(uint32_t i=0; i < 1000; i++)
-        //     {
-        //         b = A * a;
-        //     }
-        //     std::cout << "Mul time: " << (timer.getElapsedSeconds() / static_cast<float>(numIt)) << std::endl;
-        // }
-
-        std::cout << "Matrix: " << A.rows() << " x " << A.cols() << std::endl;
-        std::cout << "Sparsity: " << A.nonZeros() << " / " << A.cols() * A.rows() << std::endl;
-        
-        timer.start();
-
-        unknownsValues = std::vector<double>(numUnknows, 0.0f);
-        auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
-
-        // EigenSolver::BiCGSTAB::solve(A, b, x);
-        EigenSolver::CG::solve(A, b, x);
-
-        // std::cout << "Smooth value" << (dS * x).sum() << std::endl;
-        auto Px = P * x;
-        auto Nx = N * x;
-        double xPx = 0.0; 
-        for(uint32_t i=0; i < Px.rows(); i++)
-        {
-            const double v = Px(i);
-            xPx += glm::sqrt(v * v / covP(i));
-        }
-        xPx = xPx / static_cast<double>(Px.rows());
-        double xNx = 0.0;
-        Eigen::Vector<double, Dim> xNxD = Eigen::Vector<double, Dim>::Zero();
-        for(uint32_t i=0; i < Nx.rows(); i+=Dim)
-        {
-            Eigen::Vector<double, Dim> g;
-            for(uint32_t d=0; d < Dim; d++) g(d) = Nx(i+d);
-            auto& icov = cloud.normalInvCovariance(i/3);
-            double r = invVarGradient * g.transpose() * icov * g;
-            auto& icovT = cloud.normalInvCovarianceDes(i/3);
-            g = std::get<0>(icovT) * g;
-            double r1 = 0.0;
-            for(uint32_t d=0; d < Dim; d++) 
-            {
-                const double sq = invVarGradient * std::get<1>(icovT)(d) * g(d) * g(d);
-                xNx += glm::sqrt(sq);
-                r1 += sq;
-                xNxD(d) += glm::sqrt(sq);
-            }
-        }
-        xNx = xNx / static_cast<double>(Nx.rows());
-        std::cout << xPx << std::endl;
-        std::cout << xNx << std::endl;
-        std::cout << (0.5 * (xNxD(0) + xNxD(1)) / static_cast<double>(Nx.rows()/3)) << std::endl;
-        std::cout << xNxD(2) / static_cast<double>(Nx.rows()/3) << std::endl;
-        std::cout << invVarSmoothing * x.transpose() * dS * x << std::endl;
-        std::cout << "Time solving problem: " << timer.getElapsedSeconds() << std::endl;
-
-        timer.start();
 
         std::function<float(uint32_t)> getVertValue;
         getVertValue = [&](uint32_t vertId) -> float
