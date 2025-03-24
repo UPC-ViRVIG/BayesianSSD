@@ -43,7 +43,7 @@ public:
 		nodeTree.getNode(point, node);
 		if(!node)
 		{
-			std::cout << "out of bounds" << std::endl;
+			//std::cout << "out of bounds" << std::endl;
 			return 100.0f;
 		}
 
@@ -64,7 +64,7 @@ public:
 		nodeTree.getNode(point, node);
 		if(!node)
 		{
-			std::cout << "out of bounds" << std::endl;
+			//std::cout << "out of bounds" << std::endl;
 			return vec(0.0f);
 		}
 
@@ -87,6 +87,7 @@ public:
 	vec getMaxCoord() { return nodeTree.getMaxCoord(); }
 
 	NodeTree<Dim>& getNodeTree() { return nodeTree; }
+	std::vector<float>& getVertexValues() { return vValues; }
 
 	float getMaxAbsValue() const
 	{

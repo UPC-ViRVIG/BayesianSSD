@@ -24,8 +24,14 @@ struct InputConfig
 	float gradiantVariance;
 	float smoothnessVariance;
 	bool computeVariance;
+	float normalsDistanceFactor;
+	float normalsPointsCorrelation;
+	uint32_t normalsNumNearPoints;
+	float gradiantXYVariance;
+	float mulStd;
+	uint32_t invRedMatRank;
 
-	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradiantVariance, smoothnessVariance, computeVariance);
+	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradiantVariance, smoothnessVariance, computeVariance, normalsDistanceFactor, normalsPointsCorrelation, normalsNumNearPoints, gradiantXYVariance, mulStd, invRedMatRank);
 };
 
 char* loadFromFile(std::string path, size_t* length)
@@ -49,8 +55,8 @@ int main(int argc, char *argv[])
 #ifdef OPENMP_AVAILABLE
 	const uint32_t numThreads = 20;
 	std::cout << "Using OpenMP, " << numThreads << " threads" << std::endl;
-	omp_set_num_threads(20);
-	Eigen::setNbThreads(20);
+	omp_set_num_threads(numThreads);
+	Eigen::setNbThreads(numThreads);
 #endif
 
 	PointCloud<3> cloud;
@@ -59,6 +65,12 @@ int main(int argc, char *argv[])
 		std::cout << "Wrong arguments!" << std::endl << std::endl;
 		std::cout << "\t" << argv[0] << " <Input cloud> <Output image> [resolution]" << std::endl;
 		return -1;
+	}
+
+	uint32_t mode = 1;
+	if(argc > 2)
+	{
+		mode = std::stoi(std::string(argv[2]));
 	}
 
 	
@@ -74,10 +86,87 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	{
+        constexpr uint32_t Dim = 3;
+        using my_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud<Dim>>, PointCloud<Dim>, Dim /* dim */>;
+	    my_kd_tree_t kdtree(Dim /* dim */, cloud, {10 /* max depth */});
+
+
+        std::vector<uint32_t> nearIndexCache(2);
+	    std::vector<float> nearDistSqrCache(2);
+        double meanPairDistance = 0.0;
+        double invSize = 1.0 / static_cast<double>(cloud.size());
+        for(uint32_t i=0; i < cloud.size(); i++)
+	    {
+            uint32_t numResults = kdtree.knnSearch(reinterpret_cast<const float*>(&cloud.point(i)), 2, nearIndexCache.data(), nearDistSqrCache.data());
+            for(uint32_t j=0; j < numResults; j++)
+            {
+                if(i != nearIndexCache[j])
+                {
+                    meanPairDistance += invSize * glm::length(cloud.point(i) - cloud.point(nearIndexCache[j]));
+                    break;
+                }
+            }   
+        }
+
+        std::vector<nanoflann::ResultItem<uint32_t, float>> nearPoints;
+        std::vector<float> pVar = cloud.getVariances();
+        double meanSqPairDistance = 2.0 * meanPairDistance * meanPairDistance;
+        for(uint32_t i=0; i < cloud.size(); i++)
+        {
+            uint32_t numResults = kdtree.radiusSearch(reinterpret_cast<const float*>(&cloud.point(i)), 4 * meanPairDistance, nearPoints);
+            const double stdV1 = glm::sqrt(static_cast<double>(cloud.variance(i)));
+            for(uint32_t j=0; j < numResults; j++)
+            {
+                const uint32_t jIdx = nearPoints[j].first;
+                const glm::vec3 d = cloud.point(i) - cloud.point(jIdx);
+                pVar[i] += stdV1 * glm::sqrt(static_cast<double>(cloud.variance(jIdx))) * glm::exp(-glm::dot(d, d)/(2 * meanSqPairDistance));
+            }
+        }
+        cloud.getVariances() = pVar;
+    }
+
 	Timer timer;
 	timer.start();
-	cloud.computeNormals(0.5);
+	cloud.computeNormals(inConfig.normalsNumNearPoints, inConfig.normalsDistanceFactor, inConfig.normalsPointsCorrelation);
 	std::cout << "Time computing normals: " << timer.getElapsedSeconds() << std::endl;
+
+	for(uint32_t i=0; i < cloud.size(); i++)
+	{
+		cloud.getVariances()[i] *= inConfig.mulStd * inConfig.mulStd;
+	}
+
+	// Export point cloud
+	cloud.writeToFile("./output/" + inConfig.outputName + "_input.ply");
+	
+	// std::cout << timer.getElapsedSeconds() << std::endl;
+	// // Compute errors
+	// PointCloud<3> orgCloud = cloud;
+	// double meanAngleError = 0.0;
+	// const double invSize = 1.0 / static_cast<double>(cloud.size());
+	// for(uint32_t i=0; i < cloud.size(); i++)
+	// {
+	// 	const double val = glm::acos(static_cast<double>(glm::min(glm::dot(cloud.normal(i), orgCloud.normal(i)), 0.999999f)));
+	// 	meanAngleError += val * invSize;
+	// }
+	// std::cout << meanAngleError << std::endl;
+	// double varAngleError = 0.0;
+	// std::vector<float> xyErrors;
+	// for(uint32_t i=0; i < cloud.size(); i++)
+	// {
+	// 	const double val = glm::acos(static_cast<double>(glm::min(glm::dot(cloud.normal(i), orgCloud.normal(i)), 0.999999f)));
+	// 	varAngleError += val * val * invSize;
+	// 	auto& icovT = cloud.normalInvCovarianceDes(i);
+	// 	Eigen::Vector<double, 3> g;
+	// 	g(0) = orgCloud.normal(i)[0]; g(1) = orgCloud.normal(i)[1]; g(2) = orgCloud.normal(i)[2];
+	// 	g = std::get<0>(icovT) * g;
+	// 	xyErrors.push_back(glm::sqrt(std::get<1>(icovT)(0)) * g(0));
+	// 	xyErrors.push_back(glm::sqrt(std::get<1>(icovT)(1)) * g(1));
+	// }
+	// write_array_to_file(xyErrors, "./output/stats/" + inConfig.outputName + "_xyErrors.bin");
+	// std::cout << glm::sqrt(varAngleError) << std::endl;
+
+	// return 0; // compute only normals;
 
     glm::vec3 min(INFINITY);
     glm::vec3 max(-INFINITY);
@@ -108,11 +197,13 @@ int main(int argc, char *argv[])
 	SmoothSurfaceReconstruction::Config<3> config = {
 		.posWeight = 1.0f, 
         .gradientWeight = 1.0f/inConfig.gradiantVariance,
+		.gradientXYWeight = 1.0f/inConfig.gradiantXYVariance,
         // .smoothWeight = 1.0f/150.0f,
 		.smoothWeight = 1.0f/inConfig.smoothnessVariance,
-		.algorithm = SmoothSurfaceReconstruction::Algorithm::VAR,
+		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN,
 		.computeVariance = inConfig.computeVariance,
-		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::BASE_RED
+		.invAlgorithm = static_cast<SmoothSurfaceReconstruction::InverseAlgorithm>(mode),
+		.invRedMatRank = inConfig.invRedMatRank
 	};
 
 	timer.start();
@@ -122,10 +213,45 @@ int main(int argc, char *argv[])
 
 	std::cout << "Octree creation " << timer.getElapsedSeconds() << std::endl;
 
+	NodeTree<3> coctree;
+	if(mode == 5) 
+	{
+		config.computeVariance = false;
+		coctree = octree;
+	}
 	std::optional<LinearNodeTree<3>> covScalarField;
-
+	std::vector<glm::vec3> unkownVertices;
 	std::unique_ptr<LinearNodeTree<3>> scalarField =
-		SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octree), cloud, config, covScalarField);
+		SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octree), cloud, config, covScalarField, unkownVertices);
+
+	if(mode == 5) 
+	{
+		config.computeVariance = true;
+		quadConfig.maxDepth -= 1;
+		config.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL;
+		NodeTree<3> octreeS;
+		octreeS.compute(cloud, quadConfig);
+
+		std::optional<LinearNodeTree<3>> covScalarFieldS;
+		std::vector<glm::vec3> unkownVerticesS;
+		std::unique_ptr<LinearNodeTree<3>> scalarFieldS =
+			SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octreeS), cloud, config, covScalarFieldS, unkownVerticesS);
+
+		// std::vector<float> interVar;
+		// for(uint32_t i=0; i < unkownVertices.size(); i++)
+		// {
+		// 	interVar.push_back(covScalarFieldS->eval(unkownVertices[i]));
+		// }
+		// write_array_to_file(interVar, "./vecVarSimp.bin");
+
+		const auto& qVertices = scalarField->getNodeTree().getVertices();
+		std::vector<float> verticesValue(qVertices.size());
+		for(uint32_t i=0; i < qVertices.size(); i++)
+		{
+			verticesValue[i] = covScalarFieldS->eval(qVertices[i]);
+		}
+		covScalarField = LinearNodeTree<3>(std::move(coctree), std::move(verticesValue));
+	}
 
 	std::cout << "Compute linear node " << timer.getElapsedSeconds() << std::endl;
 
@@ -152,12 +278,16 @@ int main(int argc, char *argv[])
 
 	std::cout << "Num vertices " << mesh.vertices.size() << std::endl;
 
-	// Export point cloud
-	cloud.writeToFile("./output/" + inConfig.outputName + "_input.ply");
-
 	// Export mesh
 	happly::PLYData plyOut;
 	plyOut.addVertexPositions(*reinterpret_cast<std::vector<std::array<double, 3>>*>(&mesh.vertices));
+	std::vector<float> verticesStd;
+	for(uint32_t i=0; i < mesh.vertices.size(); i++)
+	{
+		float std = glm::sqrt(covScalarField.value().eval(glm::vec3(mesh.vertices[i].x, mesh.vertices[i].y, mesh.vertices[i].z)));
+		verticesStd.push_back(std);
+	}
+	plyOut.getElement("vertex").addProperty("noise_std", verticesStd);
 	std::vector<std::vector<uint32_t>> indices;
 	indices.reserve(mesh.triangles.size());
 	for(auto a : mesh.triangles) indices.emplace_back(a.begin(), a.end());

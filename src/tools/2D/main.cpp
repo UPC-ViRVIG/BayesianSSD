@@ -10,8 +10,41 @@
 #include "EigenSquareSolver.h"
 #include "MyImage.h"
 #include "ScalarFieldRender.h"
+#include <json_struct/json_struct.h>
 
 #include <Eigen/Cholesky>
+
+struct InputConfig
+{
+	std::string pointCloudName;
+	std::string outputName;
+	float bbMargin;
+	float octreeMaxDepth;
+	float octreeSubRuleInVoxels;
+	float gradiantVariance;
+	float smoothnessVariance;
+	bool computeVariance;
+	float mulPStd;
+	float nStd;
+
+	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradiantVariance, smoothnessVariance, computeVariance, mulPStd, nStd);
+};
+
+char* loadFromFile(std::string path, size_t* length)
+{
+    std::ifstream file;
+	file.open(path, std::ios_base::in | std::ios_base::binary);
+	if (!file.good()) return nullptr;
+	file.seekg(0, std::ios::end);
+	*length = file.tellg();
+	(*length)++;
+	char* ret = new char[*length];
+	file.seekg(0, std::ios::beg);
+	file.read(ret, *length);
+	file.close();
+	ret[(*length) - 1] = 0;
+	return ret;
+}
 
 #define M_PI 3.14159265359
 
@@ -70,20 +103,48 @@ void drawScalarField(Image& image, SF& scalarField,
 {
 	const NodeTree<2>& qtree = scalarField.getNodeTree();
 
+	// const std::vector<glm::vec3> sdfPalette = {
+	// 	glm::vec3(0.0f, 0.0f, 1.0f), 
+	// 	glm::vec3(0.0f, 0.5f, 1.0f), 
+	// 	glm::vec3(0.0f, 1.0f, 1.0f), 
+	// 	glm::vec3(1.0f, 1.0f, 1.0f), 
+	// 	glm::vec3(1.0f, 1.0f, 0.0f), 
+	// 	glm::vec3(1.0f, 0.5f, 0.0f), 
+	// 	glm::vec3(1.0f, 0.0f, 0.0f)
+	// };
+
 	const std::vector<glm::vec3> sdfPalette = {
-		glm::vec3(0.0f, 0.0f, 1.0f), 
-		glm::vec3(0.0f, 0.5f, 1.0f), 
-		glm::vec3(0.0f, 1.0f, 1.0f), 
-		glm::vec3(1.0f, 1.0f, 1.0f), 
-		glm::vec3(1.0f, 1.0f, 0.0f), 
-		glm::vec3(1.0f, 0.5f, 0.0f), 
-		glm::vec3(1.0f, 0.0f, 0.0f)
+		0.5f * glm::vec3(0.0f, 0.0f, 1.0f) + 0.45f * glm::vec3(1.0f), 
+		0.5f * glm::vec3(0.0f, 0.5f, 1.0f) + 0.45f * glm::vec3(1.0f), 
+		0.5f * glm::vec3(0.0f, 1.0f, 1.0f) + 0.45f * glm::vec3(1.0f), 
+		0.5f * glm::vec3(1.0f, 1.0f, 1.0f) + 0.45f * glm::vec3(1.0f), 
+		0.5f * glm::vec3(1.0f, 1.0f, 0.0f) + 0.45f * glm::vec3(1.0f), 
+		0.5f * glm::vec3(1.0f, 0.5f, 0.0f) + 0.45f * glm::vec3(1.0f), 
+		0.5f * glm::vec3(1.0f, 0.0f, 0.0f) + 0.45f * glm::vec3(1.0f)
 	};
 	
 	const float maxValue = scalarField.getMaxAbsValue();
-	ScalarFieldRender::renderScalarField(scalarField, image, [maxValue](float val) { return 0.5f * (1.0f + val / maxValue); }, sdfPalette,
-										 1.0f, 0.0f, 1.0f, 
-										 0.5f, 0.007f, 0.8f);
+	// ScalarFieldRender::renderScalarField(scalarField, image, [maxValue](float val) { return 0.5f * (1.0f + val / maxValue); }, sdfPalette,
+	// 									 1.0f, 0.0f, 1.0f, 
+	// 									 0.5f, 0.007f, 0.8f);
+
+	auto op = [&](float value) 
+	{
+		value = value / maxValue;
+		if(value > 0.0)
+		{
+			return 4.f / 6.f + 3.f * value / 9.0f;
+		}
+		else
+		{
+			return 2.f / 6.f+3.f * value / 9.0f;
+		}
+	};
+
+	ScalarFieldRender::renderScalarField(scalarField, image, op, sdfPalette,
+										 14.0f, 0.0f, 1.0f, 
+										 0.9f, 0.011f, 0.6f);
+
 
 	if(drawGrid)
 	{
@@ -102,7 +163,9 @@ void drawScalarField(Image& image, SF& scalarField,
 		for (glm::vec2 point : cloud->get().getPoints())
 		{
 			point = (point - minCoord) / size;
-			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::vec3(0.35f, 0.35f, 0.35f));
+			// image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10, glm::vec3(0.35f, 0.35f, 0.35f));
+			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 5.0f, glm::vec3(0.35f, 0.35f, 0.35f));
+			
 			// image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
 			// 				 3.0 * glm::sqrt(cloud->get().variance(i)), 5.0f, glm::mix(redPalette[0], redPalette[1], glm::vec3(0.35f, 0.35f, 0.35f)));
 		}
@@ -204,8 +267,8 @@ void drawCovField(Image& image, LinearNodeTree<2>& scalarField,
 			const float colorVal = (cloud->get().variance(i) - min) / (max - min);
 			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 10.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
 
-			image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
-							 3.0 * glm::sqrt(cloud->get().variance(i)), 5.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
+			// image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
+			// 				 3.0 * glm::sqrt(cloud->get().variance(i)), 5.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
 		}
 	}
 }
@@ -229,10 +292,29 @@ void drawCollisionField(Image& image, LinearNodeTree<2>& muField, LinearNodeTree
 		glm::vec3(1.0f, 0.0f, 0.0f)
 	};
 
+	const std::vector<glm::vec3> magmaPalette = {
+		glm::vec3(0.0f/255.0f, 0.0f/255.0f, 5.0f/255.0f),
+		glm::vec3(26.0f/255.0f, 10.0f/255.0f, 64.0f/255.0f), 
+		glm::vec3(75.0f/255.0f, 0.0f/255.0f, 108.0f/255.0f), 
+		glm::vec3(132.0f/255.0f, 24.0f/255.0f, 109.0f/255.0f), 
+		glm::vec3(198.0f/255.0f, 43.0f/255.0f, 91.0f/255.0f), 
+		glm::vec3(243.0f/255.0f, 95.0f/255.0f, 74.0f/255.0f), 
+		glm::vec3(252.0f/255.0f, 172.0f/255.0f, 109.0f/255.0f), 
+		glm::vec3(251.0f/255.0f, 255.0f/255.0f, 178.0f/255.0f),
+		glm::vec3(1.0f)
+	};
+
 	auto cdf = [](float x, float mu, float std)
 	{
 		return 0.5f * (1.0f + glm::abs(erf((x - mu) / (glm::sqrt(2.0f) * std))));
 	};
+
+	float minStd = 0.4;
+	// for(float& v : varField.getVertexValues())
+	// {
+	// 	minStd = glm::min(v, minStd);
+	// }
+	// minStd = glm::sqrt(minStd);
 
 	auto op = [&](glm::vec2 pos) 
 	{
@@ -240,7 +322,10 @@ void drawCollisionField(Image& image, LinearNodeTree<2>& muField, LinearNodeTree
 		float std = glm::sqrt(glm::abs(varField.eval(pos)));
 		if(printDensity)
 		{
-			return 1.0f / (glm::sqrt(2.0f * static_cast<float>(std::numbers::pi)) * std) * glm::exp(-0.5f * mu * mu / (std * std));
+			float nStd = std / minStd;
+			// return 1.0f / (glm::sqrt(2.0f * static_cast<float>(std::numbers::pi)) * std) * glm::exp(-0.5f * mu * mu / (std * std));
+			return 1.0f / nStd * glm::exp(-0.5f * mu * mu / (std * std));
+			// return glm::exp(-0.5f * mu * mu / (std * std));
 		}
 		else
 		{
@@ -255,7 +340,14 @@ void drawCollisionField(Image& image, LinearNodeTree<2>& muField, LinearNodeTree
 		}
 	};
 
-	ScalarFieldRender::renderColorField(muField, op, image, viridisPalette);
+	if(printDensity)
+	{
+		ScalarFieldRender::renderColorField(muField, [&](glm::vec2 pos) { return 1.0f - op(pos); }, image, magmaPalette);
+	}
+	else
+	{
+		ScalarFieldRender::renderColorField(muField, op, image, viridisPalette);
+	}
 
 	if(cloud)
 	{
@@ -275,8 +367,8 @@ void drawCollisionField(Image& image, LinearNodeTree<2>& muField, LinearNodeTree
 			glm::vec2 point = (cloud->get().point(i) - minCoord) / size;
 			const float colorVal = (cloud->get().variance(i) - min) / (max - min);
 			image.drawFilledCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y), 3.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
-			image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
-							 image.width() * 3.0 * glm::sqrt(cloud->get().variance(i)) / size[0], 3.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
+			// image.drawCircle(static_cast<uint32_t>(image.width() * point.x), static_cast<uint32_t>(image.height() * point.y),
+			// 				 image.width() * 3.0 * glm::sqrt(cloud->get().variance(i)) / size[0], 3.0f, glm::mix(redPalette[0], redPalette[1], colorVal));
 		}
 	}
 }
@@ -358,22 +450,32 @@ void draw1DField(LinearNodeTree<2>& muField, LinearNodeTree<2>& varField)
 int main(int argc, char *argv[])
 {
 	PointCloud<2> cloud;
-	if(argc != 3 && argc != 4)
+	if(argc != 2 && argc != 3)
 	{
 		std::cout << "Wrong arguments!" << std::endl << std::endl;
 		std::cout << "\t" << argv[0] << " <Input cloud> <Output image> [resolution]" << std::endl;
 		return -1;
 	}
+
+	size_t json_data_size;
+	char* json_data = loadFromFile(argv[1], &json_data_size);
+	JS::ParseContext context(json_data, json_data_size);
+	InputConfig inConfig;
+	context.parseTo(inConfig);
 	
-	if(!cloud.readFromFile(argv[1], true))
+	if(!cloud.readFromFile("./data/" + inConfig.pointCloudName + ".txt", true))
 	{
 		std::cout << "Input cloud could not be read!" << std::endl;
 		return -1;
 	}
 
-	for(glm::vec2& pos : cloud.getPoints())
+	//cloud.computeNormals(0.95, 0.0);
+	//cloud.computeNormals(0.95, 0.0);
+	cloud.fillNormalsData(inConfig.nStd);
+
+	for(float& v : cloud.getVariances())
 	{
-		pos += glm::vec2(0.01f);
+		v *= inConfig.mulPStd * inConfig.mulPStd;
 	}
 
 	glm::vec2 min(INFINITY);
@@ -391,29 +493,35 @@ int main(int argc, char *argv[])
     const glm::vec2 center = 0.5f * (max + min);
     float maxSize = glm::max(size.x, size.y);
     // Add margin
-    maxSize = 1.7f * maxSize;
+    maxSize = (1.0f + inConfig.bbMargin) * maxSize;
 
-	const uint32_t maxDepth = 8;
+	const uint32_t maxDepth = inConfig.octreeMaxDepth;
 	NodeTree<2>::Config quadConfig = {
 		// .minCoord = NodeTree<2>::vec(0.0f),
 		// .maxCoord = NodeTree<2>::vec(1.0f),
 		.minCoord = center - glm::vec2(0.5f * maxSize),
 		.maxCoord = center + glm::vec2(0.5f * maxSize),
-		.pointFilterMaxDistance = 1.33f * maxSize / static_cast<float>(1 << maxDepth),
+		.pointFilterMaxDistance = inConfig.octreeSubRuleInVoxels * maxSize / static_cast<float>(1 << maxDepth),
 		.constraintNeighbourNodes = true,
 		.maxDepth = maxDepth
 	};
 
+	std::cout << "Min: " << quadConfig.minCoord.x << ", " << quadConfig.minCoord.y << std::endl;
+	std::cout << "Max: " << quadConfig.maxCoord.x << ", " << quadConfig.maxCoord.y << std::endl;
+	std::cout << "Size: " << maxSize << std::endl;
+
 	NodeTree<2> quad;
 	quad.compute(cloud, quadConfig);
 
+	std::cout << "Octree generated" << std::endl;
+
 	SmoothSurfaceReconstruction::Config<2> config = {
 		.posWeight = 1.0f, 
-        .gradientWeight = 1/0.1f,
-        .smoothWeight = 1/0.5f,
-		.algorithm = SmoothSurfaceReconstruction::Algorithm::VAR,
-		.computeVariance = true,
-		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::BASE_RED
+        .gradientWeight = 1.f/inConfig.gradiantVariance,
+        .smoothWeight = 1.f/inConfig.smoothnessVariance,
+		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN,
+		.computeVariance = inConfig.computeVariance,
+		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL
 	};
 
 	std::optional<LinearNodeTree<2>> covScalarField;
@@ -424,8 +532,9 @@ int main(int argc, char *argv[])
 	std::optional<Eigen::SparseMatrix<double>> matS;
 	std::optional<Eigen::VectorXd> vecW;
 
+	std::vector<glm::vec3> vertices;
 	std::unique_ptr<LinearNodeTree<2>> scalarField = 
-		SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config, covScalarField, invCovMat, covMat, matP, matN, matS, vecW);
+		SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config, covScalarField, vertices);
 
 
 	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
@@ -724,30 +833,35 @@ int main(int argc, char *argv[])
 
 	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
 	// 	SmoothSurfaceReconstruction::computeLinearNodeTree<2, EigenSquareSolver>(cloud, config);
+
+	// Export point cloud
+	cloud.writeToFile("./output/" + inConfig.outputName + "_input.txt");
+
+	//return 0;
 	
 	std::cout << "print image" << std::endl;
 	Image image;
 	image.init(2048, 2048);
-	drawScalarField(image, *scalarField, cloud, true);
-	image.savePNG("quadtree.png");
+	drawScalarField(image, *scalarField, cloud, false);
+	image.savePNG("./output/" + inConfig.outputName + "_mu.png");
 
 	Image cimage;
 	cimage.init(2048, 2048);
 	drawCovField(cimage, *covScalarField, cloud);
-	cimage.savePNG("quadtreeCov.png");
+	cimage.savePNG("./output/" + inConfig.outputName + "_std.png");
 
 	{
 		Image colimage;
 		colimage.init(2048, 2048);
 		drawCollisionField(colimage, *scalarField, *covScalarField, false, cloud);
-		colimage.savePNG("quadtreePInside.png");
+		colimage.savePNG("./output/" + inConfig.outputName + "_pIn.png");
 	}
 
 	{
 		Image colimage;
 		colimage.init(2048, 2048);
 		drawCollisionField(colimage, *scalarField, *covScalarField, true, cloud);
-		colimage.savePNG("quadtreePSurface.png");
+		colimage.savePNG("./output/" + inConfig.outputName + "_pSur.png");
 	}
 
 	// Image imageG;
