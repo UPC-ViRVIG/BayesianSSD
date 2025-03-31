@@ -351,6 +351,10 @@ namespace SmoothSurfaceReconstruction
                     // -1
                     vec coord = quad.getVertices()[i] - dirMaxSizes[d][0] * side;
                     quad.getNode(coord, node);
+                    if(!node)
+                    {
+                        continue;
+                    }
                     Inter::eval(node->transformToLocalCoord(coord), weights);
                     const double w11 = 0.5 / dirMaxSizes[d][0];
                     const double w12 = maxPartWeight / dirMaxSizes[d][1];
@@ -366,6 +370,12 @@ namespace SmoothSurfaceReconstruction
                     // 1
                     coord = quad.getVertices()[i] + dirMaxSizes[d][1] * side;
                     quad.getNode(coord, node);
+                    if(!node)
+                    {
+                        continue;
+                        // vec tVec = (coord - quad.getMinCoord()) / (quad.getMaxCoord() - quad.getMinCoord());
+                        // std::cout << tVec.x << " " << tVec.y << " " << tVec.z << std::endl;
+                    }
                     Inter::eval(node->transformToLocalCoord(coord), weights);
                     const double w21 = minPartWeight / dirMaxSizes[d][0];
                     const double w22 = 0.5 / dirMaxSizes[d][1];
@@ -527,7 +537,6 @@ namespace SmoothSurfaceReconstruction
                     {
                         Eigen::MatrixXd SVDmat;
                         Eigen::BDCSVD<Eigen::MatrixXd> svd;
-                        double cFactor = 1.0;
                         if(config.invAlgorithm == BASE_RED || config.invAlgorithm == BASE_RED_QR)
                         {
                             std::vector<glm::ivec3> gridPoints(numUnknows);
@@ -541,11 +550,11 @@ namespace SmoothSurfaceReconstruction
                             }
                             if(Dim == 2)
                             {
-                                conv = EigenDecompositionLaplacian::getMatrix(glm::ivec3(numNodesAtMaxDepth+1, numNodesAtMaxDepth+1, 1), gridPoints, K, cFactor);
+                                conv = EigenDecompositionLaplacian::getMatrix(glm::ivec3(numNodesAtMaxDepth+1, numNodesAtMaxDepth+1, 1), gridPoints, K);
                             }
                             else
                             {
-                                conv = EigenDecompositionLaplacian::getMatrix(glm::ivec3(numNodesAtMaxDepth+1), gridPoints, K, cFactor);
+                                conv = EigenDecompositionLaplacian::getMatrix(glm::ivec3(numNodesAtMaxDepth+1), gridPoints, K);
 
                                 // std::random_device rd; // Obtain a random seed from the hardware
                                 // std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
@@ -750,78 +759,88 @@ namespace SmoothSurfaceReconstruction
 
                         CovX = invSVDmat.diagonal();
                         std::cout << "Time computing covariance: " << timer.getElapsedSeconds() << std::endl;
-                        writeMatrixToFile(invSVDmat, "invSVDmat.bin");
+                        // writeMatrixToFile(invSVDmat, "invSVDmat.bin");
+                        // Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper> solver;
+                        // solver.compute(A);
+
+                        // Eigen::VectorXd evres(numUnknows);
+                        // Eigen::VectorXd evb1 = CovX;
+                        // for(uint32_t i=0; i < numUnknows; i++)
+                        // {
+                        //     evb1(i) = 1.0;
+                        //     evres = solver.solve(evb1);
+                        //     CovX(i) = evres(i);
+                        //     evb1(i) = 0.0;
+                        //     if(i % 2000 == 0) std::cout << i << std::endl;
+                        // }
 
                         break;
 
-                        Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper> solver;
-                        solver.compute(A);
+                        // std::vector<uint32_t> unknownsToCompute;
+                        // std::vector<uint32_t> nodesToCompute;
+                        // std::function<void(uint32_t)> calculateVertex;
+                        // calculateVertex = [&](uint32_t vertId)
+                        // {
+                        //     if(vertIdToUnknownVertId[vertId] == std::numeric_limits<uint32_t>::max())
+                        //     {
+                        //         const ConstrainedUnknown& constraint = constraints[vertId];
+                        //         float res = 0.0f;
+                        //         for(uint32_t i=0; i < constraint.numOperators; i++)
+                        //         {
+                        //             calculateVertex(constraint.vertIds[i]);
+                        //         }
+                        //     }
+                        //     else unknownsToCompute.push_back(vertIdToUnknownVertId[vertId]);
+                        // };
 
-                        std::vector<uint32_t> unknownsToCompute;
-                        std::vector<uint32_t> nodesToCompute;
-                        std::function<void(uint32_t)> calculateVertex;
-                        calculateVertex = [&](uint32_t vertId)
-                        {
-                            if(vertIdToUnknownVertId[vertId] == std::numeric_limits<uint32_t>::max())
-                            {
-                                const ConstrainedUnknown& constraint = constraints[vertId];
-                                float res = 0.0f;
-                                for(uint32_t i=0; i < constraint.numOperators; i++)
-                                {
-                                    calculateVertex(constraint.vertIds[i]);
-                                }
-                            }
-                            else unknownsToCompute.push_back(vertIdToUnknownVertId[vertId]);
-                        };
+                        // std::cout << "Serach nodes contaning the isosurface" << std::endl;
+                        // // float minDist = 0.005 * glm::length(quad.getMaxCoord() - quad.getMinCoord());
+                        // for(const Node& n : quad)
+                        // {
+                        //     // bool allInside = true;
+                        //     // bool allOutside = true;
+                        //     vec size = quad.getMaxCoord() - quad.getMinCoord();
+                        //     vec oCoord = (0.5f * (n.maxCoord + n.minCoord) - quad.getMinCoord()) / size;
+                        //     bool hasMinDist = oCoord.y < 0.55f && oCoord.y > 0.45f;
+                        //     // for(uint32_t c=0; c < Inter::NumControlPoints; c++)
+                        //     // {
+                        //     //     const float val = getVertValue(n.controlPointsIdx[c]);
+                        //     //     // allInside = allInside && val < 1e-8;
+                        //     //     // allOutside = allOutside && val > -1e-8;
+                        //     //     hasMinDist = hasMinDist || glm::abs(val) < minDist;
+                        //     // }
+                        //     // if(!allInside && !allOutside)
+                        //     if(hasMinDist)
+                        //     {
+                        //         for(uint32_t c=0; c < Inter::NumControlPoints; c++)
+                        //         {
+                        //             calculateVertex(n.controlPointsIdx[c]);
+                        //         }
+                        //     }
+                        // }
+                        // std::cout << "Generate Sparse Matrix" << std::endl;
+                        // std::sort(unknownsToCompute.begin(), unknownsToCompute.end());
+                        // auto endIt = std::unique(unknownsToCompute.begin(), unknownsToCompute.end());
+                        // unknownsToCompute.resize(std::distance(unknownsToCompute.begin(), endIt));
 
-                        std::cout << "Serach nodes contaning the isosurface" << std::endl;
-                        // float minDist = 0.005 * glm::length(quad.getMaxCoord() - quad.getMinCoord());
-                        for(const Node& n : quad)
-                        {
-                            // bool allInside = true;
-                            // bool allOutside = true;
-                            vec size = quad.getMaxCoord() - quad.getMinCoord();
-                            vec oCoord = (0.5f * (n.maxCoord + n.minCoord) - quad.getMinCoord()) / size;
-                            bool hasMinDist = oCoord.y < 0.55f && oCoord.y > 0.45f;
-                            // for(uint32_t c=0; c < Inter::NumControlPoints; c++)
-                            // {
-                            //     const float val = getVertValue(n.controlPointsIdx[c]);
-                            //     // allInside = allInside && val < 1e-8;
-                            //     // allOutside = allOutside && val > -1e-8;
-                            //     hasMinDist = hasMinDist || glm::abs(val) < minDist;
-                            // }
-                            // if(!allInside && !allOutside)
-                            if(hasMinDist)
-                            {
-                                for(uint32_t c=0; c < Inter::NumControlPoints; c++)
-                                {
-                                    calculateVertex(n.controlPointsIdx[c]);
-                                }
-                            }
-                        }
-                        std::cout << "Generate Sparse Matrix" << std::endl;
-                        std::sort(unknownsToCompute.begin(), unknownsToCompute.end());
-                        auto endIt = std::unique(unknownsToCompute.begin(), unknownsToCompute.end());
-                        unknownsToCompute.resize(std::distance(unknownsToCompute.begin(), endIt));
-
-                        std::vector<Eigen::Triplet<double>> matrixTriplets;
-                        for(uint32_t i=0; i < unknownsToCompute.size(); i++)
-                        {
-                            matrixTriplets.push_back(Eigen::Triplet<double>(unknownsToCompute[i], i, 1.0));
-                        }
-                        Eigen::SparseMatrix<double> evb(numUnknows, unknownsToCompute.size());
-                        std::cout << "setFromTriplets" << std::endl;
-                        evb.setFromTriplets(matrixTriplets.begin(), matrixTriplets.end());
-                        std::cout << "Vertex found " << unknownsToCompute.size() << std::endl;
-                        Eigen::VectorXd evres(numUnknows);
-                        Eigen::VectorXd evb1 = CovX;
-                        for(uint32_t i=0; i < unknownsToCompute.size(); i++)
-                        {
-                            evb1(i) = 1.0;
-                            evres = solver.solve(evb1);
-                            CovX(unknownsToCompute[i]) = evres(i);
-                            evb1(i) = 0.0;
-                        }
+                        // std::vector<Eigen::Triplet<double>> matrixTriplets;
+                        // for(uint32_t i=0; i < unknownsToCompute.size(); i++)
+                        // {
+                        //     matrixTriplets.push_back(Eigen::Triplet<double>(unknownsToCompute[i], i, 1.0));
+                        // }
+                        // Eigen::SparseMatrix<double> evb(numUnknows, unknownsToCompute.size());
+                        // std::cout << "setFromTriplets" << std::endl;
+                        // evb.setFromTriplets(matrixTriplets.begin(), matrixTriplets.end());
+                        // std::cout << "Vertex found " << unknownsToCompute.size() << std::endl;
+                        // Eigen::VectorXd evres(numUnknows);
+                        // Eigen::VectorXd evb1 = CovX;
+                        // for(uint32_t i=0; i < unknownsToCompute.size(); i++)
+                        // {
+                        //     evb1(i) = 1.0;
+                        //     evres = solver.solve(evb1);
+                        //     CovX(unknownsToCompute[i]) = evres(i);
+                        //     evb1(i) = 0.0;
+                        // }
                     }
                     break;
                 case GP:
