@@ -141,14 +141,18 @@ void drawScalarField(Image& image, SF& scalarField,
 		}
 	};
 
+	// ScalarFieldRender::renderScalarField(scalarField, image, op, sdfPalette,
+	// 									 14.0f, 0.0f, 1.0f, 
+	// 									 0.9f, 0.011f, 0.6f);
+
 	ScalarFieldRender::renderScalarField(scalarField, image, op, sdfPalette,
-										 14.0f, 0.0f, 1.0f, 
-										 0.9f, 0.011f, 0.6f);
+										22.0f, 0.0f, 1.0f, 
+										8.0f, 0.008f, 0.6f);
 
 
 	if(drawGrid)
 	{
-		ScalarFieldRender::renderNodeTreeGrid(qtree, image, 2.0f, 0.6f);
+		ScalarFieldRender::renderNodeTreeGrid(qtree, image, 17.0f, 0.6f);
 	}
 
 	// const std::array<glm::vec3, 2> palette = {
@@ -469,7 +473,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	//cloud.computeNormals(0.95, 0.0);
+	// cloud.computeNormals(17, 0.0, 0.0);
 	//cloud.computeNormals(0.95, 0.0);
 	cloud.fillNormalsData(inConfig.nStd);
 
@@ -521,7 +525,8 @@ int main(int argc, char *argv[])
         .smoothWeight = 1.f/inConfig.smoothnessVariance,
 		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN,
 		.computeVariance = inConfig.computeVariance,
-		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL
+		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL,
+		.invRedMatRank = 200
 	};
 
 	std::optional<LinearNodeTree<2>> covScalarField;
@@ -838,11 +843,25 @@ int main(int argc, char *argv[])
 	cloud.writeToFile("./output/" + inConfig.outputName + "_input.txt");
 
 	//return 0;
+	// std::vector<float> muVector;
+	// std::vector<float> varVector;
+	// glm::vec2 minB = scalarField->getMinCoord();
+	// glm::vec2 maxB = scalarField->getMaxCoord();
+	// glm::vec2 centerB = 0.5f * (minB + maxB);
+	// for(uint32_t i=0; i < 2048; i++)
+	// {
+	// 	centerB.x = minB.x + (maxB.x - minB.x) * static_cast<float>(i)/2048.0;
+	// 	muVector.push_back(scalarField->eval(centerB));
+	// 	varVector.push_back(covScalarField->eval(centerB));
+	// }
+
+	// write_array_to_file(muVector, "muLine.txt");
+	// write_array_to_file(varVector, "varLine.txt");
 	
 	std::cout << "print image" << std::endl;
 	Image image;
 	image.init(2048, 2048);
-	drawScalarField(image, *scalarField, cloud, false);
+	drawScalarField(image, *scalarField, cloud, true);
 	image.savePNG("./output/" + inConfig.outputName + "_mu.png");
 
 	Image cimage;

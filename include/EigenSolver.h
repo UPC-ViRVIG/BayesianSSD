@@ -22,12 +22,73 @@ namespace EigenSolver
         }
     };
 
-    struct CG 
+    struct CustomSolver
     {
         template<typename TA, typename TB, typename TR>
         static void solve(TA& matrixA, TB& vectorB, TR& result)
         {
+            Eigen::VectorXd r = vectorB - matrixA*result;
+            Eigen::VectorXd diagA = matrixA.diagonal().array();
+            Eigen::VectorXd p(vectorB.rows());
+            Eigen::VectorXd z(vectorB.rows());
+            Eigen::VectorXd Ap(vectorB.rows()); 
+            
+            std::cout << "s2" << std::endl;
+            double sum=0.0f;
+            for(uint32_t i=0; i < vectorB.rows(); i++)
+            {
+                float diagV = diagA(i);
+                if(diagV<1.0e-8) diagV = 1.0e-8;
+                z(i) = r(i)/diagV;
+                p(i) = z(i);
+                sum += r(i);
+            }
+            
+            std::cout << sum << std::endl;
+            size_t niter = 0;
+            double tol=1e-10;
+            double gamma = tol+1.0;
+            while ((gamma>tol || niter<100) && niter<100000)
+            {
+                // std::cout << "s20" << std::endl;
+                // std::cout << matrixA.rows() << " " << matrixA.cols() << std::endl;
+                // std::cout << p.rows() << std::endl;
+                Ap = matrixA * p;
+                double zr = z.dot(r);
+                double alpha = zr/p.dot(Ap);
+                
+                for(uint32_t i=0; i < vectorB.rows(); i++)
+                {
+                    result(i) += alpha * p(i);
+                    r(i) = r(i) - alpha * Ap(i);
+                    float diagV = diagA(i);
+                    if(diagV<1.0e-8) diagV = 1.0e-8;
+                    z(i) = r(i) / diagV;
+                }
+                
+                double beta = z.dot(r) / zr;
+                
+                gamma = 0.0;
+                for(uint32_t i=0; i < vectorB.rows(); i++)
+                {
+                    p(i) = z(i) + beta*p(i);
+                    if (std::abs(r(i))>gamma) { gamma = std::abs(r(i)); }
+                }
+
+                niter++;
+            }
+
+            std::cout << "Num iterations: " << niter << std::endl;
+        }
+    };
+
+    struct CG 
+    {
+        template<typename TA, typename TB, typename TR>
+        static void solve(TA& matrixA, TB& vectorB, TR& result, double tol=1e-10)
+        {
             Eigen::ConjugateGradient<TA, Eigen::Lower | Eigen::Upper> solver;
+            solver.setTolerance(tol);
             solver.compute(matrixA);
             result = solver.solveWithGuess(vectorB, result);
             std::cout << "Num Iterations: " << solver.iterations() << std::endl;

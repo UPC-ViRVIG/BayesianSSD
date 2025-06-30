@@ -39,7 +39,7 @@ public:
 	const vec &normal(uint32_t index) const { return normals[index]; }
 	const Eigen::Matrix<double, Dim, Dim>& normalInvCovariance(uint32_t index) const { return normalsInvCov[index]; }
 	const std::tuple<Eigen::Matrix<double, Dim, Dim>, Eigen::Vector<double, Dim>>& normalInvCovarianceDes(uint32_t index) const { return normalsInvCovDes[index]; }
-	void computeNormals(uint32_t numNear, double stdByDistance = 0, double pointsCorrelation=0.0);
+	void computeNormals(uint32_t numNear, double stdByDistance = 0, double pointsCorrelation=0.0, double meanCurvature=0.0);
 	void fillNormalsData(double normalStd);
 
 
@@ -196,8 +196,23 @@ bool PointCloud<3>::readFromFile(const std::string &filename, bool readVariance)
 	return true;
 }
 
-template<uint32_t Dim>
-void PointCloud<Dim>::fillNormalsData(double normalStd) { }
+template<>
+void PointCloud<3>::fillNormalsData(double normalStd) 
+{
+	const uint32_t Dim = 3;
+	for(uint32_t i=0; i < size(); i++)
+	{
+		const vec n = normal(i);
+		Eigen::Matrix<double, Dim, Dim> R = Eigen::Matrix<double, Dim, Dim>::Identity();
+		Eigen::Vector<double, Dim> invVar;
+		invVar(0) = 1.0 / normalStd*normalStd;
+		invVar(1) = 1.0 / normalStd*normalStd;
+		invVar(2) = 1.0 / normalStd*normalStd;
+
+		normalsInvCov[i] = R.transpose() * invVar.asDiagonal() * R;
+		normalsInvCovDes[i] = std::make_tuple(R, invVar);
+	}
+}
 
 template<>
 void PointCloud<2>::fillNormalsData(double normalStd)
@@ -241,7 +256,7 @@ void PointCloud<2>::fillNormalsData(double normalStd)
 }
 
 template<uint32_t Dim>
-void PointCloud<Dim>::computeNormals(uint32_t numNear, double varByDistancePer, double pointsCorrelation)
+void PointCloud<Dim>::computeNormals(uint32_t numNear, double varByDistancePer, double pointsCorrelation, double meanCurvature)
 {
 	bool useCovariances = pointsCorrelation > 0.0;
 	using my_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud<Dim>>, PointCloud<Dim>, Dim /* dim */>;
@@ -295,13 +310,17 @@ void PointCloud<Dim>::computeNormals(uint32_t numNear, double varByDistancePer, 
 
 		// Compute mean distance
 		vec c = vec(0.0f);
-		double meanDistance = 0.0;
 		const float invNumResults = 1.0f / static_cast<float>(numResults);
 		for(uint32_t j=0; j < numResults; j++)
 		{
-			meanDistance += glm::length(points[nearIndexCache[j]] - points[i]) * invNumResults;
 			for(uint32_t d=0; d < Dim; d++) 
 				c[d] += invNumResults * points[nearIndexCache[j]][d];
+		}
+
+		double meanDistance = 0.0;
+		for(uint32_t j=0; j < numResults; j++)
+		{
+			meanDistance += glm::length(points[nearIndexCache[j]] - c) * invNumResults;
 		}
 
 		const double meanSqDistance = meanNeighbourDistance * meanNeighbourDistance;
@@ -330,13 +349,16 @@ void PointCloud<Dim>::computeNormals(uint32_t numNear, double varByDistancePer, 
 		// Compute covariance matrix
 		nCovMat = Eigen::Matrix<double, Dim, Dim>::Zero();
 		P = Eigen::MatrixXd::Zero(numNear, Dim);
-		const double v1 = variance(i);
+		// const double v1 = variance(i);
+		const double v1 = 0.0;
 		for(uint32_t j=0; j < numResults; j++)
 		{
 			const double v2 = variance(nearIndexCache[j]);
 			const vec p = points[nearIndexCache[j]] - c;
 			double sqDist = glm::dot(p, p) / meanSqDistance;
-			const double pVar = (1.0 + varByDistancePer * (sqDist-1.0))  * (v1 + v2);
+			double pVar = (1.0 + varByDistancePer * (sqDist-1.0))  * (v1 + v2);
+			pVar += meanCurvature * meanCurvature * glm::dot(p, p);
+			// pVar = meanCurvature * meanCurvature * glm::dot(p, p);
 			if(useCovariances)
 			{
 				for(uint32_t d = 0; d < Dim; d++) P(j, d) = p[d];
@@ -359,7 +381,7 @@ void PointCloud<Dim>::computeNormals(uint32_t numNear, double varByDistancePer, 
 		if(useCovariances)
 		{
 			// const double sqMeanMinPairDistance = meanMinPairDistance * meanMinPairDistance;
-			const double sqMeanMinPairDistance = 2 * meanDistance * meanDistance * invNumResults;
+			const double sqMeanMinPairDistance = meanDistance * meanDistance * invNumResults;
 			for(uint32_t j=0; j < numResults; j++)
 			{
 				const double vj = pCovMat(j, j);

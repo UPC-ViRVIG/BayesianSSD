@@ -20,6 +20,19 @@ const vec3 viridisPalette[6] = vec3[6](
     vec3(253./255., 231./255., 37./255.)
 );
 
+const int magmaPaletteNumColors = 9;
+const vec3 magmaPalette[9] = vec3[9](
+    vec3(0./255., 0./255., 5./255.),
+    vec3(26./255., 10./255., 64./255.), 
+    vec3(75./255., 0./255., 108./255.), 
+    vec3(132./255., 24./255., 109./255.), 
+    vec3(198./255., 43./255., 91./255.), 
+    vec3(243./255., 95./255., 74./255.), 
+    vec3(252./255., 172./255., 109./255.), 
+    vec3(251./255., 255./255., 178./255.),
+    vec3(1.)
+);
+
 vec3 getSdfPaletteColor(float val)
 {
     float index = clamp(val * (sdfPaletteNumColors-1), 0.0, float(sdfPaletteNumColors-1) - 0.01);
@@ -30,4 +43,10 @@ vec3 getViridisPaletteColor(float val)
 {
     float index = clamp(val * (viridisPaletteNumColors-1), 0.0, float(viridisPaletteNumColors-1) - 0.01);
     return mix(viridisPalette[int(index)], viridisPalette[int(index)+1], fract(index));
+}
+
+vec3 getMagmaPaletteColor(float val)
+{
+    float index = clamp(val * (magmaPaletteNumColors-1), 0.0, float(magmaPaletteNumColors-1) - 0.01);
+    return mix(magmaPalette[int(index)], magmaPalette[int(index)+1], fract(index));
 }

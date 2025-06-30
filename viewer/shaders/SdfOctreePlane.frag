@@ -47,11 +47,13 @@ void main()
     float distToLevel = 0.5 - abs(fract(abs(dist) / linesSpace) - 0.5);
     float dDistToLevel = dDist / linesSpace;
     float linesColorWeight = float(printIsolines) * 0.5 * clamp(1.0 - pow(abs(distToLevel) / (dDistToLevel * linesThickness), 8), 0.0, 1.0);
+    // linesColorWeight = 0.0;
 
     // Heat map color
     vec3 finalColor = getSdfPaletteColor(0.5 + 0.5 * dist / octreeValueRange);
-    vec3 grad = distanceScale * getGradient(gridPosition);
-    finalColor = (length(grad) > 1.0) ? vec3(1.0, clamp(length(grad)-1., 0., 1.), clamp(length(grad)-1., 0., 1.)) : vec3(1-length(grad), 1.0, 1-length(grad));
+    // vec3 grad = distanceScale * getGradient(gridPosition);
+    // finalColor = (length(grad) > 1.0) ? vec3(1.0, clamp(length(grad)-1., 0., 1.), clamp(length(grad)-1., 0., 1.)) : vec3(1-length(grad), 1.0, 1-length(grad));
+    // finalColor = vec3(1.0);
 
     fragColor = vec4(mix(finalColor, vec3(0.0, 0.0, 0.0), max(max(surfaceColorWeight, gridColorWeight), linesColorWeight)), 1.0);
 }

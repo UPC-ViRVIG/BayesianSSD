@@ -35,24 +35,30 @@ void main()
     float distToGrid = 0.0;
     float nodeRelativeLength;
     float dist = getDistance(gridPosition, distToGrid, nodeRelativeLength);
-    float std = sqrt(abs(getVar(gridPosition, distToGrid, nodeRelativeLength)));
+    // float std = sqrt(abs(getVar(gridPosition, distToGrid, nodeRelativeLength)));
+    float std = getStd(gridPosition, distToGrid, nodeRelativeLength);
 
     float value;
+    vec3 finalColor;
     if(mode == 0)
     {
         float sqVarOctreeMaxValue = sqrt(abs(varOctreeMaxValue));
         float sqVarOctreeMinValue = sqrt(abs(varOctreeMinValue));
         value = (std - sqVarOctreeMinValue) / (sqVarOctreeMaxValue - sqVarOctreeMinValue);
+        finalColor = getViridisPaletteColor(value);
     }
     else if(mode == 1)
     {
-        value = 1.0 / sqrt(2.0 * M_PI * std) * exp(-0.5 * dist * dist / (std * std));
+        // value = exp(-0.5 * dist * dist / (std * std)) / (sqrt(2.0 * M_PI)*std);
+        float nStd = std / 0.055;
+        value = 1.0 / nStd * exp(-0.5 * dist * dist / (std * std));
+        finalColor = getMagmaPaletteColor(1. - value);
     }
     else
     {
         value = (dist > 0.0) ? 1.0 - cdf(0.0, dist, std) : cdf(0.0, dist, std);
+        finalColor = getViridisPaletteColor(value);
     }
 
-    vec3 finalColor = getViridisPaletteColor(value);
     fragColor = vec4(finalColor, 1.0);
 }

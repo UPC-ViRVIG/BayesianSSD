@@ -79,6 +79,10 @@ int main(int argc, char *argv[])
 	JS::ParseContext context(json_data, json_data_size);
 	InputConfig inConfig;
 	context.parseTo(inConfig);
+
+	// inConfig.gradiantXYVariance = 1.0;
+	// inConfig.mulStd = 1.0;
+	// inConfig.invRedMatRank = 512;
 	
 	if(!cloud.readFromFile("./data/" + inConfig.pointCloudName + ".ply"))
 	{
@@ -86,50 +90,68 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	{
-        constexpr uint32_t Dim = 3;
-        using my_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud<Dim>>, PointCloud<Dim>, Dim /* dim */>;
-	    my_kd_tree_t kdtree(Dim /* dim */, cloud, {10 /* max depth */});
+	// {
+    //     constexpr uint32_t Dim = 3;
+    //     using my_kd_tree_t = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud<Dim>>, PointCloud<Dim>, Dim /* dim */>;
+	//     my_kd_tree_t kdtree(Dim /* dim */, cloud, {10 /* max depth */});
 
 
-        std::vector<uint32_t> nearIndexCache(2);
-	    std::vector<float> nearDistSqrCache(2);
-        double meanPairDistance = 0.0;
-        double invSize = 1.0 / static_cast<double>(cloud.size());
-        for(uint32_t i=0; i < cloud.size(); i++)
-	    {
-            uint32_t numResults = kdtree.knnSearch(reinterpret_cast<const float*>(&cloud.point(i)), 2, nearIndexCache.data(), nearDistSqrCache.data());
-            for(uint32_t j=0; j < numResults; j++)
-            {
-                if(i != nearIndexCache[j])
-                {
-                    meanPairDistance += invSize * glm::length(cloud.point(i) - cloud.point(nearIndexCache[j]));
-                    break;
-                }
-            }   
-        }
+    //     std::vector<uint32_t> nearIndexCache(2);
+	//     std::vector<float> nearDistSqrCache(2);
+    //     double meanPairDistance = 0.0;
+    //     double invSize = 1.0 / static_cast<double>(cloud.size());
+    //     for(uint32_t i=0; i < cloud.size(); i++)
+	//     {
+    //         uint32_t numResults = kdtree.knnSearch(reinterpret_cast<const float*>(&cloud.point(i)), 2, nearIndexCache.data(), nearDistSqrCache.data());
+    //         for(uint32_t j=0; j < numResults; j++)
+    //         {
+    //             if(i != nearIndexCache[j])
+    //             {
+    //                 meanPairDistance += invSize * glm::length(cloud.point(i) - cloud.point(nearIndexCache[j]));
+    //                 break;
+    //             }
+    //         }   
+    //     }
 
-        std::vector<nanoflann::ResultItem<uint32_t, float>> nearPoints;
-        std::vector<float> pVar = cloud.getVariances();
-        double meanSqPairDistance = 2.0 * meanPairDistance * meanPairDistance;
-        for(uint32_t i=0; i < cloud.size(); i++)
+    //     std::vector<nanoflann::ResultItem<uint32_t, float>> nearPoints;
+    //     std::vector<float> pVar = cloud.getVariances();
+    //     double meanSqPairDistance = 2.0 * meanPairDistance * meanPairDistance;
+    //     for(uint32_t i=0; i < cloud.size(); i++)
+    //     {
+    //         uint32_t numResults = kdtree.radiusSearch(reinterpret_cast<const float*>(&cloud.point(i)), 4 * meanPairDistance, nearPoints);
+    //         const double stdV1 = glm::sqrt(static_cast<double>(cloud.variance(i)));
+    //         for(uint32_t j=0; j < numResults; j++)
+    //         {
+    //             const uint32_t jIdx = nearPoints[j].first;
+    //             const glm::vec3 d = cloud.point(i) - cloud.point(jIdx);
+    //             pVar[i] += stdV1 * glm::sqrt(static_cast<double>(cloud.variance(jIdx))) * glm::exp(-glm::dot(d, d)/(2 * meanSqPairDistance));
+    //         }
+    //     }
+    //     cloud.getVariances() = pVar;
+    // }
+
+	PointCloud<3> orgCloud = cloud;
+	
+    glm::vec3 min(INFINITY);
+    glm::vec3 max(-INFINITY);
+    for(glm::vec3 p : cloud.getPoints())
+    {
+        for(uint32_t i=0; i < 3; i++)
         {
-            uint32_t numResults = kdtree.radiusSearch(reinterpret_cast<const float*>(&cloud.point(i)), 4 * meanPairDistance, nearPoints);
-            const double stdV1 = glm::sqrt(static_cast<double>(cloud.variance(i)));
-            for(uint32_t j=0; j < numResults; j++)
-            {
-                const uint32_t jIdx = nearPoints[j].first;
-                const glm::vec3 d = cloud.point(i) - cloud.point(jIdx);
-                pVar[i] += stdV1 * glm::sqrt(static_cast<double>(cloud.variance(jIdx))) * glm::exp(-glm::dot(d, d)/(2 * meanSqPairDistance));
-            }
+            min[i] = glm::min(min[i], p[i]);
+            max[i] = glm::max(max[i], p[i]);
         }
-        cloud.getVariances() = pVar;
     }
+    const glm::vec3 size = max - min;
+    const glm::vec3 center = 0.5f * (max + min);
+	const float bbRadius = 0.5f * glm::distance(min, max);
 
 	Timer timer;
 	timer.start();
-	cloud.computeNormals(inConfig.normalsNumNearPoints, inConfig.normalsDistanceFactor, inConfig.normalsPointsCorrelation);
-	std::cout << "Time computing normals: " << timer.getElapsedSeconds() << std::endl;
+	cloud.computeNormals(inConfig.normalsNumNearPoints, 0.0, inConfig.normalsPointsCorrelation, inConfig.normalsDistanceFactor / bbRadius);
+	// cloud.computeNormals(inConfig.normalsNumNearPoints, inConfig.normalsDistanceFactor, inConfig.normalsPointsCorrelation, 0.0f);
+	// cloud.fillNormalsData(0.0001);
+	// std::cout << "Time computing normals: " << timer.getElapsedSeconds() << std::endl;
 
 	for(uint32_t i=0; i < cloud.size(); i++)
 	{
@@ -139,9 +161,8 @@ int main(int argc, char *argv[])
 	// Export point cloud
 	cloud.writeToFile("./output/" + inConfig.outputName + "_input.ply");
 	
-	// std::cout << timer.getElapsedSeconds() << std::endl;
-	// // Compute errors
-	// PointCloud<3> orgCloud = cloud;
+	std::cout << timer.getElapsedSeconds() << std::endl;
+	// Compute errors
 	// double meanAngleError = 0.0;
 	// const double invSize = 1.0 / static_cast<double>(cloud.size());
 	// for(uint32_t i=0; i < cloud.size(); i++)
@@ -168,19 +189,6 @@ int main(int argc, char *argv[])
 
 	// return 0; // compute only normals;
 
-    glm::vec3 min(INFINITY);
-    glm::vec3 max(-INFINITY);
-    for(glm::vec3 p : cloud.getPoints())
-    {
-        for(uint32_t i=0; i < 3; i++)
-        {
-            min[i] = glm::min(min[i], p[i]);
-            max[i] = glm::max(max[i], p[i]);
-        }
-    }
-
-    const glm::vec3 size = max - min;
-    const glm::vec3 center = 0.5f * (max + min);
     float maxSize = glm::max(size.x, glm::max(size.y, size.z));
     // Add margin
     maxSize = (1.0f + inConfig.bbMargin) * maxSize;
@@ -214,7 +222,8 @@ int main(int argc, char *argv[])
 	std::cout << "Octree creation " << timer.getElapsedSeconds() << std::endl;
 
 	NodeTree<3> coctree;
-	if(mode == 5) 
+	bool computeSimpleVariance = mode == 5 && config.computeVariance;
+	if(computeSimpleVariance) 
 	{
 		config.computeVariance = false;
 		coctree = octree;
@@ -224,10 +233,10 @@ int main(int argc, char *argv[])
 	std::unique_ptr<LinearNodeTree<3>> scalarField =
 		SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octree), cloud, config, covScalarField, unkownVertices);
 
-	if(mode == 5) 
+	if(computeSimpleVariance)
 	{
 		config.computeVariance = true;
-		quadConfig.maxDepth -= 1;
+		quadConfig.maxDepth -= 3;
 		config.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL;
 		NodeTree<3> octreeS;
 		octreeS.compute(cloud, quadConfig);
@@ -256,6 +265,41 @@ int main(int argc, char *argv[])
 	std::cout << "Compute linear node " << timer.getElapsedSeconds() << std::endl;
 
 
+	// std::map<std::tuple<int, int, int>, double> newValues;
+
+	// std::ifstream inputFile("gridData.bin", std::ios::binary);
+    // if (!inputFile.is_open()) {
+    //     std::cerr << "Error opening binary file!" << std::endl;
+    //     return 1;
+    // }
+
+    // int pos[3];
+    // double v;
+    // while (inputFile.read(reinterpret_cast<char*>(&pos[0]), sizeof(pos[0]))) {
+    //     if (!inputFile.read(reinterpret_cast<char*>(&pos[1]), sizeof(pos[1]))) break;
+    //     if (!inputFile.read(reinterpret_cast<char*>(&pos[2]), sizeof(pos[2]))) break;
+    //     if (!inputFile.read(reinterpret_cast<char*>(&v), sizeof(v))) break;
+    //     newValues[std::make_tuple(pos[0], pos[1], pos[2])] = v;
+    // }
+	// std::cout << "NumValues " << newValues.size() << std::endl;
+
+    // inputFile.close();
+
+	// uint32_t notFound = 0;
+	// for(uint32_t i=0; i < scalarField->getNodeTree().getNumVertices(); i++)
+	// {
+	// 	glm::vec3 p = scalarField->getNodeTree().getVertices()[i];
+	// 	glm::ivec3 ip = glm::round(64.0f * (p - scalarField->getNodeTree().getMinCoord()) / (scalarField->getNodeTree().getMaxCoord() - scalarField->getNodeTree().getMinCoord()));
+	// 	auto it = newValues.find(std::make_tuple(ip.x, ip.y, ip.z));
+	// 	if(it != newValues.end())
+	// 	{
+	// 		scalarField->getVertexValues()[i] = it->second;
+	// 		if(i % 50000 == 0) std::cout << it->second << std::endl;
+	// 	} else notFound++;
+	// }
+	// std::cout << "Not Found " << notFound << std::endl;
+
+
 	// Execute Marching Cubes
 	auto toVec3 = [](glm::vec3 p) -> MeshReconstruction::Vec3
 	{
@@ -273,7 +317,8 @@ int main(int argc, char *argv[])
 	const glm::vec3 bbSize = scalarField->getMaxCoord() - scalarField->getMinCoord();
 	MeshReconstruction::Rect3 mcDomain { toVec3(scalarField->getMinCoord()), 
 										 toVec3(bbSize)};
-	MeshReconstruction::Vec3 cubeSize = toVec3(glm::vec3(bbSize / static_cast<float>(1 << (maxDepth+1))));
+	// MeshReconstruction::Vec3 cubeSize = toVec3(glm::vec3(bbSize / static_cast<float>(1 << (maxDepth+1))));
+	MeshReconstruction::Vec3 cubeSize = toVec3(glm::vec3(bbSize / static_cast<float>(1 << maxDepth-1)));
 	MeshReconstruction::Mesh mesh = MeshReconstruction::MarchCube(fSdf, mcDomain, cubeSize, 0.0, gSdf);
 
 	std::cout << "Num vertices " << mesh.vertices.size() << std::endl;
@@ -281,18 +326,21 @@ int main(int argc, char *argv[])
 	// Export mesh
 	happly::PLYData plyOut;
 	plyOut.addVertexPositions(*reinterpret_cast<std::vector<std::array<double, 3>>*>(&mesh.vertices));
-	std::vector<float> verticesStd;
-	for(uint32_t i=0; i < mesh.vertices.size(); i++)
+	if(inConfig.computeVariance)
 	{
-		float std = glm::sqrt(covScalarField.value().eval(glm::vec3(mesh.vertices[i].x, mesh.vertices[i].y, mesh.vertices[i].z)));
-		verticesStd.push_back(std);
+		std::vector<float> verticesStd;
+		for(uint32_t i=0; i < mesh.vertices.size(); i++)
+		{
+			float std = glm::sqrt(covScalarField.value().eval(glm::vec3(mesh.vertices[i].x, mesh.vertices[i].y, mesh.vertices[i].z)));
+			verticesStd.push_back(std);
+		}
+		plyOut.getElement("vertex").addProperty("noise_std", verticesStd);
 	}
-	plyOut.getElement("vertex").addProperty("noise_std", verticesStd);
 	std::vector<std::vector<uint32_t>> indices;
 	indices.reserve(mesh.triangles.size());
 	for(auto a : mesh.triangles) indices.emplace_back(a.begin(), a.end());
 	plyOut.addFaceIndices(indices);
-	plyOut.write("./output/" + inConfig.outputName + ".ply", happly::DataFormat::ASCII);
+	plyOut.write("./output/" + inConfig.outputName + ".ply", happly::DataFormat::Binary);
 	std::cout << "Done" << std::endl;
 	
     // Export octree

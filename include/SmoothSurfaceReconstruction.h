@@ -419,6 +419,8 @@ namespace SmoothSurfaceReconstruction
         Eigen::SparseMatrix<double> P = pointsMatrix.getMatrix();
         pointsMatrix = EigenSparseMatrix(0, 0); // Free memory
         auto covP = pointsCovVector.getVector();
+        Eigen::VectorXd invCovP = covP;
+        for(uint32_t i=0; i < invCovP.rows(); i++) invCovP(i) = 1.0 / invCovP(i);
 
         Eigen::SparseMatrix<double> N = gradientMatrix.getMatrix();
         gradientMatrix = EigenSparseMatrix(0, 0); // Free memory
@@ -439,7 +441,7 @@ namespace SmoothSurfaceReconstruction
 
         invVarGradient = 1.0;
         Eigen::VectorXd b = invVarGradient * N.transpose() * iCovN * gradientVector.getVector();
-        Eigen::SparseMatrix<double> A = P.transpose() * covP.asDiagonal().inverse() * P + invVarGradient * N.transpose() * iCovN * N + invVarSmoothing * dS;
+        Eigen::SparseMatrix<double> A = P.transpose() * invCovP.asDiagonal() * P + invVarGradient * N.transpose() * iCovN * N + invVarSmoothing * dS;
         // Eigen::SparseMatrix<double> A = P.transpose() * covP.asDiagonal().inverse() * P + invVarGradient * N.transpose() * N + invVarSmoothing * (S.transpose() * S);
         std::cout << "Time setting the problem: " << timer.getElapsedSeconds() << std::endl;
 
@@ -454,7 +456,7 @@ namespace SmoothSurfaceReconstruction
         auto x = Eigen::Map<Eigen::VectorXd>(unknownsValues.data(), unknownsValues.size());
 
         // EigenSolver::BiCGSTAB::solve(A, b, x);
-        EigenSolver::CG::solve(A, b, x);
+        EigenSolver::CG::solve(A, b, x, 1e-10 * static_cast<double>(cloud.size()));
 
         std::cout << "Time solving problem: " << timer.getElapsedSeconds() << std::endl;
 
@@ -758,22 +760,25 @@ namespace SmoothSurfaceReconstruction
                         // CovX = resInv.diagonal();
 
                         CovX = invSVDmat.diagonal();
-                        std::cout << "Time computing covariance: " << timer.getElapsedSeconds() << std::endl;
+                        break;
+                        
                         // writeMatrixToFile(invSVDmat, "invSVDmat.bin");
-                        // Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper> solver;
-                        // solver.compute(A);
+                        Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper> solver;
+                        solver.setTolerance(1e-10 * static_cast<double>(cloud.size()));
+                        solver.compute(A);
 
-                        // Eigen::VectorXd evres(numUnknows);
-                        // Eigen::VectorXd evb1 = CovX;
-                        // for(uint32_t i=0; i < numUnknows; i++)
-                        // {
-                        //     evb1(i) = 1.0;
-                        //     evres = solver.solve(evb1);
-                        //     CovX(i) = evres(i);
-                        //     evb1(i) = 0.0;
-                        //     if(i % 2000 == 0) std::cout << i << std::endl;
-                        // }
-
+                        Eigen::VectorXd evres(numUnknows);
+                        Eigen::VectorXd evb1 = CovX;
+                        for(uint32_t i=0; i < numUnknows; i++)
+                        {
+                            evb1(i) = 1.0;
+                            evres = solver.solve(evb1);
+                            CovX(i) = evres(i);
+                            evb1(i) = 0.0;
+                            if(i % 2000 == 0) std::cout << i << std::endl;
+                        }
+                        
+                        std::cout << "Time computing covariance: " << timer.getElapsedSeconds() << std::endl;
                         break;
 
                         // std::vector<uint32_t> unknownsToCompute;

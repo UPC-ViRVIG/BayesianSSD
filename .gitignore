@@ -6,6 +6,11 @@ build*/
 scans/
 data/
 output/
+config/
+data_o/
+figures/
+models/
+mats/
 
 # Created by https://www.toptal.com/developers/gitignore/api/cmake,vs,c++
 # Edit at https://www.toptal.com/developers/gitignore?templates=cmake,vs,c++

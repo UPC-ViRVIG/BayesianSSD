@@ -188,4 +188,49 @@ float getVar(vec3 point, out float distToGrid, out float nodeRelativeLength)
     return d0 * (1.0f - fracPart.z) + d1 * fracPart.z;
 }
 
+float getStd(vec3 point, out float distToGrid, out float nodeRelativeLength)
+{
+    vec3 fracPart = point * startGridSize;
+    ivec3 arrayPos = ivec3(floor(fracPart));
+    fracPart = fract(fracPart);
+
+    int index = arrayPos.z * int(startGridSize.y * startGridSize.x) +
+                arrayPos.y * int(startGridSize.x) +
+                arrayPos.x;
+    uint currentNode = varOctreeData[index];
+    nodeRelativeLength = 1.0;
+
+    while(!bool(currentNode & isLeafMask))
+    {
+        uint childIdx = (roundFloat(fracPart.z) << 2) + 
+                        (roundFloat(fracPart.y) << 1) + 
+                         roundFloat(fracPart.x);
+
+        currentNode = varOctreeData[(currentNode & childrenIndexMask) + childIdx];
+        fracPart = fract(2.0 * fracPart);
+        nodeRelativeLength *= 0.5;
+    }
+
+    vec3 distToGridAxis = vec3(0.5) - abs(fracPart - vec3(0.5));
+    distToGrid = min(min((abs(planeNormal.x) < 0.95) ? distToGridAxis.x : 1.0, 
+                         (abs(planeNormal.y) < 0.95) ? distToGridAxis.y : 1.0),
+                         (abs(planeNormal.z) < 0.95) ? distToGridAxis.z : 1.0);
+
+    uint vIndex = currentNode & childrenIndexMask;
+
+    float d00 = sqrt(abs(uintBitsToFloat(varOctreeData[vIndex]))) * (1.0f - fracPart.x) +
+                sqrt(abs(uintBitsToFloat(varOctreeData[vIndex + 1]))) * fracPart.x;
+    float d01 = sqrt(abs(uintBitsToFloat(varOctreeData[vIndex + 2]))) * (1.0f - fracPart.x) +
+                sqrt(abs(uintBitsToFloat(varOctreeData[vIndex + 3]))) * fracPart.x;
+    float d10 = sqrt(abs(uintBitsToFloat(varOctreeData[vIndex + 4]))) * (1.0f - fracPart.x) +
+                sqrt(abs(uintBitsToFloat(varOctreeData[vIndex + 5]))) * fracPart.x;
+    float d11 = sqrt(abs(uintBitsToFloat(varOctreeData[vIndex + 6]))) * (1.0f - fracPart.x) +
+                sqrt(abs(uintBitsToFloat(varOctreeData[vIndex + 7]))) * fracPart.x;
+
+    float d0 = d00 * (1.0f - fracPart.y) + d01 * fracPart.y;
+    float d1 = d10 * (1.0f - fracPart.y) + d11 * fracPart.y;
+
+    return d0 * (1.0f - fracPart.z) + d1 * fracPart.z;
+}
+
 #endif

@@ -149,4 +149,13 @@ if(MSVC)
     target_compile_options(recon_lib PRIVATE "/bigobj")
 endif()
 
+file(GLOB SOURCE_FILES ./src/*.cpp)
+add_executable(sampling src/tools/Sampling/main.cpp ${SOURCE_FILES})
+target_include_directories(sampling PRIVATE src)
+target_include_directories(sampling PUBLIC include)
+target_link_libraries(sampling PUBLIC eigen glm happly cereal::cereal nanoflann LowRankSVD openmp MeshReconstruction json_struct petsc)
+if(MSVC)
+    target_compile_options(sampling PRIVATE "/bigobj")
+endif()
+
 add_subdirectory(viewer)

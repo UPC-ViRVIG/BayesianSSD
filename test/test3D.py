@@ -1,40 +1,12 @@
 # from gpytoolbox import stochastic_poisson_surface_reconstruction
-import os
-
-os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import scipy
 import gpytoolbox
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-
-# def read_matrix_from_file(filename):
-#     """Reads a matrix from a binary file written by the C++ code."""
-#     try:
-#         with open(filename, "rb") as f:
-#             rows = np.fromfile(f, dtype=np.int32, count=1)[0]
-#             cols = np.fromfile(f, dtype=np.int32, count=1)[0]
-#             matrix = np.fromfile(f, dtype=np.float64, count=rows * cols).reshape(cols, rows)
-#             return matrix.T
-#     except FileNotFoundError:
-#         print(f"Error: File not found: {filename}")
-#         return None
-#     except Exception as e:  # Catch other potential errors during file reading
-#         print(f"An error occurred: {e}")
-#         return None
-
-
-# mat = -read_matrix_from_file("../PSRtestSvalue.bin")
-# final = np.empty((mat.shape[0], mat.shape[1], 3))
-# final[..., 0] = mat
-# final[..., 1] = mat
-# final[..., 2] = mat
-# print(final.shape)
-# final = final.astype(np.float32)
-# cv2.imwrite("./grayScaleImage2SSD.exr", final)
-# exit()
+from plyfile import PlyData, PlyElement
+import time
 
 
 def read_text_file(file_path):
@@ -60,11 +32,19 @@ def read_text_file(file_path):
 
 
 # data = read_text_file("../data/myshape.txt")
-data = read_text_file("../data/PSRtest.txt")
-P = data[:, :2]
-N = -data[:, 2:4]
+# data = read_text_file("../data/testSparsePoints.txt")
+# data = PlyData.read("../data/MyHand.ply")
+# data = PlyData.read("../data/BunnyTest5K.ply")
+data = PlyData.read("../output/HorseModel_input.ply")
+P = np.zeros((len(data.elements[0].data["x"]), 3))
+P[..., 0] = np.array(data.elements[0].data["x"])
+P[..., 1] = np.array(data.elements[0].data["y"])
+P[..., 2] = np.array(data.elements[0].data["z"])
+N = np.zeros((len(data.elements[0].data["x"]), 3))
+N[..., 0] = np.array(data.elements[0].data["nx"])
+N[..., 1] = np.array(data.elements[0].data["ny"])
+N[..., 2] = np.array(data.elements[0].data["nz"])
 DEPTH = 6
-# DEPTH = 4
 IMAGE_SIZE = 2056
 
 min = np.min(P, axis=0)
@@ -72,44 +52,36 @@ max = np.max(P, axis=0)
 max_size = np.max(max - min)
 center = 0.5 * (min + max)
 
-minB = center - np.ones(center.shape) * 0.5 * 1.5 * max_size
-maxB = center + np.ones(center.shape) * 0.5 * 1.5 * max_size
+minB = center - np.ones(center.shape) * 0.5 * 1.1 * max_size
+maxB = center + np.ones(center.shape) * 0.5 * 1.1 * max_size
 
 grid_size = np.ones(center.shape) * (np.power(2, DEPTH) + 1)
 
 grid_spacing = (maxB - minB) / (grid_size - 1)
-print(grid_size)
-print(grid_spacing)
-print(minB)
 
-
+start = time.time()
+K = 128
 scalar_mean, scalar_variance, grid_vertices = gpytoolbox.stochastic_poisson_surface_reconstruction(
     P,
-    -N,
+    N,
     gs=grid_size.astype(np.int32),
     h=grid_spacing,
     corner=minB,
     output_variance=True,
-    sigma_n=0.3,
-    sigma=0.6,
+    solve_subspace_dim=K,
+    sigma_n=0.1,
+    sigma=0.1,
+    verbose=True,
 )
-
-# mean_values = gpytoolbox.stochastic_poisson_surface_reconstruction(
-#     P,
-#     N,
-#     gs=grid_size.astype(np.int32),
-#     h=grid_spacing,
-#     corner=minB,
-#     output_variance=True,
-#     sigma_n=0.2,
-#     sigma=0.8,
-# )
-
-# np.save("./myVectors", mean_values)
-
+print(f"Time {time.time() - start}")
 
 scalar_mean = np.reshape(scalar_mean, grid_vertices[0].shape)
 scalar_variance = np.reshape(scalar_variance, grid_vertices[0].shape)
+print(scalar_variance.shape)
+np.save(f"varK{K}.bin", scalar_variance)
+print(
+    f"Min {np.min(np.ndarray.flatten(scalar_variance))} // Max {np.max(np.ndarray.flatten(scalar_variance))}"
+)
 
 image_range = np.power(2, DEPTH) * np.arange(0.0, 1.0, 1 / IMAGE_SIZE)
 xs, ys = np.meshgrid(image_range, image_range)
@@ -132,8 +104,8 @@ def getImage(scalars):
     return d0 * (1.0 - rys) + d1 * rys
 
 
-image_mean = getImage(scalar_mean)
-image_variance = getImage(scalar_variance)
+image_mean = getImage(scalar_mean[int(scalar_mean.shape[2] * 0.4), ...])
+image_variance = getImage(scalar_variance[int(scalar_mean.shape[2] * 0.4), ...])
 
 image_shape = image_mean.shape
 image_mean = np.ndarray.flatten(image_mean)
@@ -168,19 +140,6 @@ def getColorImage(img, palette, vmin, vmax):
     return final
 
 
-grayPalette = np.array([[0, 0, 0], [255, 255, 255]]).astype(np.float32)
-
-# print(np.min(image_mean))
-# print(np.max(image_mean))
-# image_mean = np.reshape(image_mean, image_shape)
-# final = np.empty((image_shape[0], image_shape[1], 3))
-# final[..., 0] = image_mean
-# final[..., 1] = image_mean
-# final[..., 2] = image_mean
-# print(final.shape)
-# final = final.astype(np.float32)
-# cv2.imwrite("./grayScaleImage.exr", final)
-
 cv2.imwrite(
     "./quadtreePSurface.png",
     getColorImage(surface_density, viridisPalette, 0.0, 1.0).astype(np.uint8),
@@ -188,6 +147,16 @@ cv2.imwrite(
 cv2.imwrite(
     "./quadtreePInside.png",
     getColorImage(inside_prob, viridisPalette, 0.0, 1.0).astype(np.uint8),
+)
+
+cv2.imwrite(
+    "./quadtreeVar.png",
+    getColorImage(
+        np.reshape(image_variance, image_shape),
+        viridisPalette,
+        np.min(image_variance),
+        np.max(image_variance),
+    ).astype(np.uint8),
 )
 
 # with open("data.txt", "w") as f:

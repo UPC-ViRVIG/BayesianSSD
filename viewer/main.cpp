@@ -256,6 +256,7 @@ public:
         }
 
         mr::Window::getCurrentWindow().setBackgroudColor(glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+        // mr::Window::getCurrentWindow().setBackgroudColor(glm::vec4(1.f, 1.f, 1.f, 1.0f));
 
         mSelectArea = mMeanOctree->getGridBoundingBox();
 
@@ -268,12 +269,12 @@ public:
                                    mCloud.getPoints().data(), mCloud.getPoints().size());
             myPoint->setDrawMode(GL_POINT);
             myPoint->setShader(mr::Shader::loadShader("BasicRender"));
-            myPoint->getShader().setUniform("outColor", glm::vec4(0.0, 0.0, 1.0, 1.0));
+            myPoint->getShader().setUniform("outColor", glm::vec4(0.4, 0.4, 0.95, 1.0));
             const glm::vec3 center = mMeanOctree->getGridBoundingBox().getCenter();
             const glm::vec3 size = mMeanOctree->getGridBoundingBox().getSize();
             myPoint->setTransform(glm::scale(glm::mat4(1.f), 1.0f / size) * glm::translate(glm::mat4(1.0f), -center));
             glEnable(GL_PROGRAM_POINT_SIZE);
-            glPointSize(5);
+            glPointSize(2);
         }
 
         { // Create box
@@ -299,6 +300,9 @@ public:
             }
 
             mGizmoStartMatrix = glm::mat4x4(1.0f);
+            // std::cout << (mMeanOctree->getGridBoundingBox().getCenter() - 0.2f * mMeanOctree->getGridBoundingBox().getSize()).z << std::endl;
+            // std::cout << mMeanOctree->getGridBoundingBox().getCenter().x << " // " << mMeanOctree->getGridBoundingBox().getCenter().y << std::endl;
+            // std::cout << mMeanOctree->getGridBoundingBox().getSize().x << std::endl;
             mGizmoMatrix = mGizmoStartMatrix;
             mPlaneModel->setTransform(mGizmoMatrix);
 
@@ -393,7 +397,8 @@ public:
         ImGuiIO& io = ImGui::GetIO();
     	ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
 
-        if(!mr::Window::getCurrentWindow().isKeyPressed(GLFW_KEY_LEFT_CONTROL))
+        ImGui::Checkbox("Show Gizmos", &mShowGizmos);
+        if(mShowGizmos && !mr::Window::getCurrentWindow().isKeyPressed(GLFW_KEY_LEFT_CONTROL))
 		{
 			if(mr::Window::getCurrentWindow().isKeyPressed(GLFW_KEY_LEFT_ALT))
 			{
@@ -408,6 +413,15 @@ public:
 								ImGuizmo::OPERATION::TRANSLATE_Z, ImGuizmo::MODE::LOCAL, glm::value_ptr(mGizmoMatrix));
 			}
 		}
+
+        if(mr::Window::getCurrentWindow().isKeyPressed(GLFW_KEY_KP_ADD))
+        {
+            mGizmoMatrix = glm::translate(mGizmoMatrix, glm::vec3(0., 0., 0.1f * deltaTime));
+        }
+        else if(mr::Window::getCurrentWindow().isKeyPressed(GLFW_KEY_KP_SUBTRACT))
+        {
+            mGizmoMatrix = glm::translate(mGizmoMatrix, glm::vec3(0., 0., -0.1f * deltaTime));
+        }
 
         mPlaneModel->setTransform(mGizmoMatrix);
         const glm::vec3 planeNormal = glm::normalize(glm::vec3(mGizmoMatrix * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)));
@@ -465,6 +479,8 @@ private:
 
     glm::mat4x4 mGizmoStartMatrix;
     glm::mat4x4 mGizmoMatrix;
+
+    bool mShowGizmos = true;
 };
 
 int main(int argc, char** argv)

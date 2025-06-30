@@ -35,7 +35,7 @@ public:
         uint32_t depth;
         std::array<uint32_t, NumVerticesPerNode> controlPointsIdx;
 
-        vec transformToLocalCoord(vec point)
+        vec transformToLocalCoord(vec point) const
         {
             return (point - minCoord) / (maxCoord - minCoord);
         }
@@ -325,7 +325,7 @@ void NodeTree<Dim>::compute(const PointCloud<Dim> &cloud, Config config)
         uint32_t idx = 0;
         for(uint32_t i=Dim-1; i < Dim; i--)
         {
-            idx = ((1 << maxDepth) + 1) * idx + glm::round(norm[i] * octreeLength);
+            idx = ((1 << maxDepth) + 1) * idx + static_cast<uint32_t>(glm::round(norm[i] * octreeLength));
         }
         
         auto it = idxToCPid.find(idx);

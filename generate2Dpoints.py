@@ -1,10 +1,13 @@
 import math
 import random
 import pathlib
+import numpy as np
 
-SAMPLE_POINTS = 50
-POINTS_SIZE = 1.0
-OUT_FILE = "C:/Users/user/Documents/reconstruction/data/cshape1.txt"
+SAMPLE_POINTS = 40
+# POINTS_STD = 0.8
+POINTS_STD = 0.008
+OUT_FILE = "C:/Users/user/Documents/reconstruction/data/SGPTextTest.txt"
+SAMPLE_RANDOM = False
 
 
 def sum(a, b):
@@ -320,8 +323,10 @@ if len(objs) > 0 and type(objs[0]) == SimplePathObject:
     points = []
     for i in range(SAMPLE_POINTS):
         print("Start")
-        v = random.random()
-        # v = i / SAMPLE_POINTS
+        if SAMPLE_RANDOM:
+            v = random.random()
+        else:
+            v = i / SAMPLE_POINTS
         v *= totalLength
         index = 0
         cLength = 0
@@ -338,20 +343,58 @@ if len(objs) > 0 and type(objs[0]) == SimplePathObject:
         print(v)
         point, tan = subpaths[index].sample(v)
         tan = norm(tan)
-        c = circle(point, POINTS_SIZE)
+        tan = [-tan[0], -tan[1]]  # Inv normal vector
+        c = circle(point, 3 * POINTS_STD)
         c.svg_set("opt-tx", tan[0])
         c.svg_set("opt-ty", tan[1])
+        rad = [POINTS_STD * POINTS_STD]
         # circle(sum(point, tan), POINTS_SIZE * 0.4)
-        points.append(point + tan)
+        points.append(point + tan + rad)
     store_points(points)
 else:
+    print("hi")
     points = []
     for obj in all_shapes():
+        print("sel")
         if type(obj) == SimpleObject:
+            print("simple")
             p = [obj.svg_get("cx", False), obj.svg_get("cy", False)]
             tan = [obj.svg_get("opt-tx", False), obj.svg_get("opt-ty", False)]
             rad = obj.svg_get("r", False)
-            rad = [] if rad == None else [rad * rad]
+            # if rad != None:
+            #     rad *= 1.1
+            # The radius represents the 89% of the points (3*std)
+            rad = [POINTS_STD * POINTS_STD] if rad == None else [rad * rad / 9]
             if p[0] != None and p[1] != None and tan[0] != None and tan[1] != None:
+                tan[0] = tan[0]
+                tan[1] = tan[1]
                 points.append(p + tan + rad)
+    points = np.array(points)
+    # Add noise
+    points[..., 0] = np.random.normal(loc=points[..., 0], scale=np.sqrt(points[..., 4]))
+    points[..., 1] = np.random.normal(loc=points[..., 1], scale=np.sqrt(points[..., 4]))
+    # Print points
+    pnts = group()
+    # pntsVar = group()
+    normals = group()
+    for p, g, var in zip(points[..., :2], points[..., 2:4], points[..., 4]):
+        pnts.append(circle(p, 0.01))
+        # pntsVar.append(circle(p, np.sqrt(var) * 2))
+        normals.append(line(p, p + g * 0.6))
+    print(points.shape)
     store_points(points)
+    # print("hi12")
+    # points = []
+    # for obj in all_shapes():
+    #     print("sel")
+    #     if type(obj) == SimpleObject:
+    #         print("simple")
+    #         x1 = [obj.svg_get("x1", False), obj.svg_get("y1", False)]
+    #         x2 = [obj.svg_get("x2", False), obj.svg_get("y2", False)]
+    #         if x1[0] != None and x1[1] != None and x2[0] != None and x2[1] != None:
+    #             x1 = np.array(x1)
+    #             x2 = np.array(x2)
+    #             points.append((x1, x1 + 0.5 * (x2 - x1)))
+    # normals = group()
+    # for a, b in points:
+    #     normals.append(line(a, b))
