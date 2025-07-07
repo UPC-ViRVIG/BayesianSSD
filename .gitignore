@@ -8,6 +8,8 @@ data/
 output/
 config/
 data_o/
+figures_files/
+test/
 figures/
 models/
 mats/
