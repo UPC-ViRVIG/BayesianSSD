@@ -7,15 +7,15 @@ BayesianSSD is a reconstruction algorithm from noisy point clouds. The method in
 
 ## Compiling
 
-All the dependencies of the project are downloaded automatically during the CMake execution.
+All the project dependencies are downloaded automatically during the CMake execution.
 
 ## How to use
 
-The project has to main targets `recon_2d` and `recon_3d`. Next, we have a description of each one.
+The project has two main targets: `recon_2d` and `recon_3d`. Next, we have a description of each one.
 
 ### 2D Reconstruction
 
-The target `recon_2d` makes a 2D reconstruction. The inputs are a point cloud specified in text format and a configuration JSON file. The outputs are the PNG images of the reconstruction.
+The target `recon_2d` makes a 2D reconstruction. The inputs are a point cloud specified in text format and a configuration JSON file. The outputs are PNG images of the reconstruction showing different properties.
 
 ##### Point cloud description
 
@@ -27,7 +27,7 @@ The target `recon_2d` makes a 2D reconstruction. The inputs are a point cloud sp
 
 ### 3D Reconstruction
 
-The target `recon_3d` makes a 3D reconstruction. The inputs are a point cloud specified as a PLY with some custom properties and a configuretion JSON file. The outputs are a PLY of the final mesh and two binary files that store the reconstructed field in a custom format. These binary files can be used in the 3D viewer (explained below) to observe different properties.
+The target `recon_3d` makes a 3D reconstruction. The inputs are a point cloud specified as a PLY with some custom properties and a configuration JSON file. The outputs are a PLY of the final mesh and two binary files that store the reconstructed field in a custom format. These binary files can be used in the 3D viewer (explained below) to observe different properties.
 
 ##### Point cloud description
 
