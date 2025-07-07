@@ -3,7 +3,7 @@ Official Code for SGP 2025 paper [Bayesian 3D Shape Reconstruction from Noisy Po
 
 BayesianSSD is a reconstruction algorithm from noisy point clouds. The method integrates the concept of uncertainty in the input and output. The inputs are a set of points with their corresponding isotropic variances. Optionally, the user can also specify the normals and their corresponding variances. Otherwise, they are computed using a Bayesian PCA. Even when the PCA computes the normals, it is important to give an approximated normal to specify its orientation.
 
-![Intro Image](image.png)
+![Intro Image](https://github.com/user-attachments/assets/10f90163-f18e-4dcb-a7d8-91cc0ad7d4be)
 
 ## Compiling
 
