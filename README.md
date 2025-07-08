@@ -11,23 +11,65 @@ All the project dependencies are downloaded automatically during the CMake execu
 
 ## How to use
 
-The project has two main targets: `recon_2d` and `recon_3d`. Next, we have a description of each one.
+The project has two main targets: `recon_2d` and `recon_3d`. 
+
+Both targets use the same configuration files. The config file is a JSON that contains all the important information for a reconstruction. The configurable fields are:
+
+- `pointCloudName`: The file name of the point cloud. The program will look at the folder `{CurrentPath}/data`.
+- `outputName`: The file name of the reconstruction outputs. All the outputs will be written in the folder `{CurrentPath}/output`.
+- `bbMargin`: Margin between the models BB and the octree BB. The margin is expressed regarding the size of the model BB, e.g., a value of 0.2 is a 10% margin on each side. 
+- `octreeMaxDepth`: The octree maximum depth.
+- `octreeSubRuleInVoxels`: Specifies the subdivision rule. This value defines the minimum distance that a node has to be from any point to stop being subdivided. The magnitude of the values is expressed in terms of the voxel length at maximum depth.
+- `gradientStd`: Multiplicative factor applied to the gradient standard deviation. This value helps control the values of the PCA result when the final field has a gradient that is too small or too large.
+- `smoothnessStd`: This value is the standard deviation of the field curvature prior.
+- `computeVariance`: Boolean that specifies whether the algorithm should compute the output variances.
+- `inverseMethod`: Specifies the method to invert the matrix required to compute the variance of the solution. It can have three options: `"full"`, `"octree_red"`, `"base_red"`. With `"full"`, the inverse of the matrix is computed without any approximation (can be expensive for big problems). With `"octree_red"`, the variances are calculated by simplifying the octree (using an octree of lower depth to compute the variance). Finally, with `"base_red"`, the inverse is calculated using a low rank approximation using the Laplacian eigenvalues to get the more meaningful values.
+- `baseRedRank`: When the option `"base_red"` is selected, this value specifies the rank of the matrix to invert.
+- `octreeRedDepth`: When the option `"octree_red"` is selected, this value is the maximum depth of the simplified octree used to compute the variances.
+- `mulPointsStd`: Multiplicative factor applied to the standard deviation of all the points.
+- `computeNormals`: Boolean specifying if the normals should be computed using the Bayesian PCA.
+- `normalsNumNearPoints`: Number of neighbour points to use for the Bayesian PCA.
+- `normalsDistanceFactor`: The noise factor added to the normals computations (beta value in the paper).
+- `defaultNormalsStd`: Default normals variance value when Bayesian PCA is not used.
+
+Example:
+
+
+Next, we have a description of the inputs and outputs of each one.
 
 ### 2D Reconstruction
 
-The target `recon_2d` makes a 2D reconstruction. The inputs are a point cloud specified in text format and a configuration JSON file. The outputs are PNG images of the reconstruction showing different properties.
+The target `recon_2d` makes a 2D reconstruction. The inputs are a point cloud specified in text format and the configuration file. The outputs are PNG images of the reconstruction showing different properties.
 
 ##### Point cloud description
 
+In the 2D version, the input point cloud is encoded in a .txt file. The first row has a number specifying the number of points. The following line defines the properties of each point (each property is separated by spaces). Next, we have a format example where the tags between parentheses should be replaced by the corresponding values.
 
-##### Reconstruction config
+```
+[Number of points]
+[Position x] [Position y] [Normal x] [Normal y] [Variance]
+...
+```
+Example:
+```
+1
+69.3 30.4 -0.9 -0.43 2.4
+```
 
+These files should be placed inside the **data** folder.
 
 ##### Outputs
 
+In the 2D case the outputs of the method are four PNG images when the variance computation is enables, which are:
+
+- `[outputName]_mu.png`: Image showing the final field, which correspond to the mean values.
+- `[outputName]_pIn.png`: Image showing the probability of beign inside or outside using the virdis palette.
+- `[outputName]_pSur.png`: Image showing the confidence of of the surface beign there using the magma palette.
+- `[outputName]_std.png`: The output variances using the virdis palette.
+
 ### 3D Reconstruction
 
-The target `recon_3d` makes a 3D reconstruction. The inputs are a point cloud specified as a PLY with some custom properties and a configuration JSON file. The outputs are a PLY of the final mesh and two binary files that store the reconstructed field in a custom format. These binary files can be used in the 3D viewer (explained below) to observe different properties.
+The target `recon_3d` makes a 3D reconstruction. The inputs are a point cloud specified as a PLY with some custom properties and the configuration file. The outputs are a PLY of the final mesh and two binary files that store the reconstructed field in a custom format. These binary files can be used in the 3D viewer (explained below) to observe different properties.
 
 ##### Point cloud description
 
