@@ -83,9 +83,9 @@ namespace SmoothSurfaceReconstruction
     struct Config
     {
         float posWeight;
-        float gradientWeight;
+        float gradientWeight; // inverse of the std
         float gradientXYWeight;
-        float smoothWeight;
+        float smoothWeight; // inverse of the std
         Algorithm algorithm;
         bool computeVariance;
         InverseAlgorithm invAlgorithm;
@@ -94,27 +94,7 @@ namespace SmoothSurfaceReconstruction
 
     template<uint32_t Dim>
     std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
-                                                               std::optional<LinearNodeTree<Dim>>& outCovariance, std::vector<glm::vec3>& vertices)
-    {
-        std::optional<Eigen::MatrixXd> invCovMat;
-        std::optional<Eigen::MatrixXd> covMat;
-        std::optional<Eigen::SparseMatrix<double>> outP;
-        std::optional<Eigen::SparseMatrix<double>> outN;
-        std::optional<Eigen::SparseMatrix<double>> outS;
-        std::optional<Eigen::VectorXd> outW;
-        return computeLinearNodeTree(std::move(quad), cloud, config, outCovariance, invCovMat, covMat, outP, outN, outS, outW, vertices);
-    }
- 
-    template<uint32_t Dim>
-    std::unique_ptr<LinearNodeTree<Dim>> computeLinearNodeTree(NodeTree<Dim>&& quad, const PointCloud<Dim>& cloud, Config<Dim> config,
-                                                               std::optional<LinearNodeTree<Dim>>& outCovariance,
-                                                               std::optional<Eigen::MatrixXd>& invCovMat,
-                                                               std::optional<Eigen::MatrixXd>& covMat,
-                                                               std::optional<Eigen::SparseMatrix<double>>& outP,
-                                                               std::optional<Eigen::SparseMatrix<double>>& outN,
-                                                               std::optional<Eigen::SparseMatrix<double>>& outS,
-                                                               std::optional<Eigen::VectorXd>& outW,
-                                                               std::vector<glm::vec3>& vertices)
+                                                               std::optional<LinearNodeTree<Dim>>& outCovariance)
     {
         using NodeTreeConfig = NodeTree<Dim>::Config;
         using Inter = MultivariateLinearInterpolation<Dim>;
@@ -485,19 +465,19 @@ namespace SmoothSurfaceReconstruction
                 xNxD(d) += glm::sqrt(sq);
             }
         }
-        std::cout << meanMag / static_cast<double>(Nx.rows()/Dim) << std::endl;
-        std::cout << xPx << std::endl;
-        if(Dim == 3)
-        {
-            std::cout << (0.5 * (xNxD(0) + xNxD(1)) / static_cast<double>(Nx.rows()/Dim)) << std::endl;
-            std::cout << xNxD(2) / static_cast<double>(Nx.rows()/Dim) << std::endl;
-        }
-        if(Dim == 2)
-        {
-            std::cout << xNxD(0) / static_cast<double>(Nx.rows()/Dim) << std::endl;
-            std::cout << xNxD(1) / static_cast<double>(Nx.rows()/Dim) << std::endl;
-        }
-        std::cout << invVarSmoothing * x.transpose() * dS * x << std::endl;
+        std::cout << "Mean gradient magnitude at the points: " << meanMag / static_cast<double>(Nx.rows()/Dim) << std::endl;
+        std::cout << "Points normalized variance: " << xPx << std::endl;
+        // if(Dim == 3)
+        // {
+        //     std::cout << (0.5 * (xNxD(0) + xNxD(1)) / static_cast<double>(Nx.rows()/Dim)) << std::endl;
+        //     std::cout << xNxD(2) / static_cast<double>(Nx.rows()/Dim) << std::endl;
+        // }
+        // if(Dim == 2)
+        // {
+        //     std::cout << xNxD(0) / static_cast<double>(Nx.rows()/Dim) << std::endl;
+        //     std::cout << xNxD(1) / static_cast<double>(Nx.rows()/Dim) << std::endl;
+        // }
+        // std::cout << invVarSmoothing * x.transpose() * dS * x << std::endl;
         std::cout << "Time solving problem: " << timer.getElapsedSeconds() << std::endl;
 
         P = Eigen::SparseMatrix<double>();
@@ -533,7 +513,7 @@ namespace SmoothSurfaceReconstruction
             switch(config.invAlgorithm)
             {
                 case FULL:
-                    //break; // CHANGED
+                    break; // CHANGED
                 case BASE_RED:
                 case BASE_RED_QR:
                     {
@@ -575,7 +555,6 @@ namespace SmoothSurfaceReconstruction
                             // std::cout << "QR" << std::endl;
                             if(config.invAlgorithm == BASE_RED_QR)
                             {
-                                std::cout << "QR" << std::endl;
                                 Eigen::HouseholderQR<Eigen::MatrixXd> qr(conv);
                                 auto thinQ = Eigen::MatrixXd::Identity(conv.rows(), conv.cols());
                                 Eigen::MatrixXd q = qr.householderQ();
@@ -598,9 +577,7 @@ namespace SmoothSurfaceReconstruction
                             // writeMatrixToFile(conv, "conv.bin");
 
                             Eigen::MatrixXd SVDredMat = conv.transpose() * (A * conv);
-                            std::cout << "Red: " << timer.getElapsedSeconds() << std::endl;
                             svd = Eigen::BDCSVD<Eigen::MatrixXd>(SVDredMat, Eigen::ComputeThinU | Eigen::ComputeThinV);
-                            std::cout << "SVD: " << timer.getElapsedSeconds() << std::endl;
                         }
                         else
                         {
@@ -705,44 +682,30 @@ namespace SmoothSurfaceReconstruction
             {
                 case VAR:
                     {
-                        std::cout << "S" << std::endl;
                         auto sA = P.transpose() * covP.asDiagonal().inverse() * P + invVarGradient * N.transpose() * iCovN * N;
                         if(config.invAlgorithm == BASE_RED || config.invAlgorithm == BASE_RED_QR)
                         {
-                            std::cout << "M1" << std::endl;
-                            timer.start();
                             RowMMatrixXd CAC = conv.transpose() * sA * conv;
                             CAC = invSVDmat * (CAC * invSVDmat.transpose());
                             Eigen::MatrixXd svdC = CAC * conv.transpose();
-                            std::cout << timer.getElapsedSeconds() << std::endl;
-                            std::cout << "M2" << std::endl;
-                            timer.start();
                             for(uint32_t i=0; i < numUnknows; i++) // Compute only the diagonal
                             {
                                 CovX(i) = conv.row(i).dot(svdC.col(i));
                             }
-                            std::cout << timer.getElapsedSeconds() << std::endl;
                         }
                         else
                         {
-                            std::cout << "M1" << std::endl;
-                            timer.start();
                             Eigen::MatrixXd sASVD = sA * invSVDmat.transpose();
-                            std::cout << timer.getElapsedSeconds() << std::endl;
-                            std::cout << "M2" << std::endl;
-                            timer.start();
                             for(uint32_t i=0; i < numUnknows; i++) // Compute only the diagonal
                             {
                                 CovX(i) = invSVDmat.row(i).dot(sASVD.col(i));
                             }
-                            std::cout << timer.getElapsedSeconds() << std::endl;
                         }
                     }
                     break;
                 case BAYESIAN:
                     if(config.invAlgorithm == BASE_RED || config.invAlgorithm == BASE_RED_QR)
                     {
-                        std::cout << "Final part: " << timer.getElapsedSeconds() << std::endl;
                         Eigen::MatrixXd svdC = invSVDmat * conv.transpose();
                         for(uint32_t i=0; i < numUnknows; i++) // Compute only the diagonal
                         {
@@ -759,8 +722,8 @@ namespace SmoothSurfaceReconstruction
                         // EigenSolver::CG::solve(A, identityMat, resInv);
                         // CovX = resInv.diagonal();
 
-                        CovX = invSVDmat.diagonal();
-                        break;
+                        // CovX = invSVDmat.diagonal();
+                        // break;
                         
                         // writeMatrixToFile(invSVDmat, "invSVDmat.bin");
                         Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper> solver;
@@ -775,7 +738,7 @@ namespace SmoothSurfaceReconstruction
                             evres = solver.solve(evb1);
                             CovX(i) = evres(i);
                             evb1(i) = 0.0;
-                            if(i % 2000 == 0) std::cout << i << std::endl;
+                            if(i % 1000 == 0) std::cout << i << std::endl;
                         }
                         
                         std::cout << "Time computing covariance: " << timer.getElapsedSeconds() << std::endl;
@@ -855,6 +818,7 @@ namespace SmoothSurfaceReconstruction
             // covMat = std::optional<Eigen::MatrixXd>(CovX);
         }
 
+        timer.start();
         std::function<float(uint32_t)> getVertCov;
         getVertCov = [&](uint32_t vertId) -> float
         {

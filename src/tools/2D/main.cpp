@@ -21,13 +21,21 @@ struct InputConfig
 	float bbMargin;
 	float octreeMaxDepth;
 	float octreeSubRuleInVoxels;
-	float gradiantVariance;
-	float smoothnessVariance;
+	float gradientStd;
+	float smoothnessStd;
 	bool computeVariance;
-	float mulPStd;
-	float nStd;
+	std::string inverseMethod;
+	uint32_t baseRedRank;
+	uint32_t octreeRedDepth;
+	float mulPointsStd;
+	bool computeNormals;
+	uint32_t normalsNumNearPoints;
+	float normalsDistanceFactor;
+	float defaultNormalsStd;
 
-	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradiantVariance, smoothnessVariance, computeVariance, mulPStd, nStd);
+	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradientStd, smoothnessStd, computeVariance, 
+		   inverseMethod, baseRedRank, octreeRedDepth, mulPointsStd, 
+		   computeNormals, normalsNumNearPoints, normalsDistanceFactor, defaultNormalsStd);
 };
 
 char* loadFromFile(std::string path, size_t* length)
@@ -152,7 +160,7 @@ void drawScalarField(Image& image, SF& scalarField,
 
 	if(drawGrid)
 	{
-		ScalarFieldRender::renderNodeTreeGrid(qtree, image, 17.0f, 0.6f);
+		ScalarFieldRender::renderNodeTreeGrid(qtree, image, 10.0f, 0.6f);
 	}
 
 	// const std::array<glm::vec3, 2> palette = {
@@ -473,13 +481,9 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	// cloud.computeNormals(17, 0.0, 0.0);
-	//cloud.computeNormals(0.95, 0.0);
-	cloud.fillNormalsData(inConfig.nStd);
-
 	for(float& v : cloud.getVariances())
 	{
-		v *= inConfig.mulPStd * inConfig.mulPStd;
+		v *= inConfig.mulPointsStd * inConfig.mulPointsStd;
 	}
 
 	glm::vec2 min(INFINITY);
@@ -496,6 +500,19 @@ int main(int argc, char *argv[])
     const glm::vec2 size = max - min;
     const glm::vec2 center = 0.5f * (max + min);
     float maxSize = glm::max(size.x, size.y);
+	const float bbRadius = 0.5f * glm::distance(min, max);
+
+	// Compute normals
+	if(inConfig.computeNormals)
+	{
+		cloud.computeNormals(inConfig.normalsNumNearPoints, 0.0, 0.0, inConfig.normalsDistanceFactor / bbRadius);
+	}
+	else
+	{
+		cloud.fillNormalsData(inConfig.defaultNormalsStd);
+	}
+
+
     // Add margin
     maxSize = (1.0f + inConfig.bbMargin) * maxSize;
 
@@ -519,325 +536,55 @@ int main(int argc, char *argv[])
 
 	std::cout << "Octree generated" << std::endl;
 
+	SmoothSurfaceReconstruction::InverseAlgorithm invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL;
+	if(inConfig.inverseMethod == "base_red") invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::BASE_RED;
+	const bool computeSimpleVariance = inConfig.computeVariance && inConfig.inverseMethod == "octree_red";
+
 	SmoothSurfaceReconstruction::Config<2> config = {
 		.posWeight = 1.0f, 
-        .gradientWeight = 1.f/inConfig.gradiantVariance,
-        .smoothWeight = 1.f/inConfig.smoothnessVariance,
+        .gradientWeight = 1.f/inConfig.gradientStd,
+        .smoothWeight = 1.f/inConfig.smoothnessStd,
 		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN,
 		.computeVariance = inConfig.computeVariance,
-		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL,
-		.invRedMatRank = 200
+		.invAlgorithm = invAlgorithm,
+		.invRedMatRank = inConfig.baseRedRank
 	};
 
+	NodeTree<2> cquad;
 	std::optional<LinearNodeTree<2>> covScalarField;
-	std::optional<Eigen::MatrixXd> invCovMat;
-	std::optional<Eigen::MatrixXd> covMat;
-	std::optional<Eigen::SparseMatrix<double>> matP;
-	std::optional<Eigen::SparseMatrix<double>> matN;
-	std::optional<Eigen::SparseMatrix<double>> matS;
-	std::optional<Eigen::VectorXd> vecW;
 
-	std::vector<glm::vec3> vertices;
+	if(computeSimpleVariance)
+	{
+		config.computeVariance = false;
+		cquad = quad;
+	}
 	std::unique_ptr<LinearNodeTree<2>> scalarField = 
-		SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config, covScalarField, vertices);
+		SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, config, covScalarField);
+
+	if(computeSimpleVariance)
+	{
+		config.computeVariance = true;
+		quadConfig.maxDepth = inConfig.octreeRedDepth;
+		config.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL;
+		NodeTree<2> quadS;
+		quadS.compute(cloud, quadConfig);
+
+		std::optional<LinearNodeTree<2>> covScalarFieldS;
+		std::unique_ptr<LinearNodeTree<2>> scalarFieldS = 
+			SmoothSurfaceReconstruction::computeLinearNodeTree<2>(std::move(quadS), cloud, config, covScalarFieldS);
+
+		const auto& qVertices = scalarField->getNodeTree().getVertices();
+		std::vector<float> verticesValue(qVertices.size());
+		for(uint32_t i=0; i < qVertices.size(); i++)
+		{
+			verticesValue[i] = covScalarFieldS->eval(qVertices[i]);
+		}
+		covScalarField = LinearNodeTree<2>(std::move(cquad), std::move(verticesValue));
+	}
 
 
 	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
 	// 	GPReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, covScalarField);
-
-
-	// Eigen::JacobiSVD<Eigen::MatrixXd> svd(covMat.value(), Eigen::ComputeThinU | Eigen::ComputeThinV);
-	// Eigen::VectorXd sv = svd.singularValues();
-	// uint32_t numZeros = 0;
-	// for(uint32_t i=0; i < sv.size(); i++)
-	// {
-	// 	if(sv(i) > 1e-9)
-	// 	{
-	// 		sv(i) = 1.0f / sv(i);
-	// 	}
-	// 	else
-	// 	{
-	// 		numZeros++;
-	// 		sv(i) = 0.0f;
-	// 	}
-	// }
-	// std::cout << "num zeros " << numZeros << std::endl;
-	// Eigen::MatrixXd invCovMat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
-
-	std::cout << "End compute" << std::endl;
-
-	// Eigen::LLT<Eigen::MatrixXd> covLLT(covMat.value());
-	// Eigen::MatrixXd L = covLLT.matrixL();
-	// std::cout << "End compute Cholensky" << std::endl;
-
-	// Eigen::VectorXd basicGaussianValues(vecW.value().rows());
-
-	// std::random_device rd{};
-    // std::mt19937 gen{rd()};
-
-	// std::normal_distribution gaussianSampler;
-
-	// std::vector<double> sumW(vecW.value().rows(), 0.0);
-	// auto vSumW = Eigen::Map<Eigen::VectorXd>(sumW.data(), sumW.size());
-
-	// std::cout << "Start sampling" << std::endl;
-	// // const uint32_t numSamples = 2048000;
-	// const uint32_t numSamples = 20480;
-	// double sumWeights = 0.0;
-	// std::vector<double> differences;
-	// double mg = 0.0;
-	// double mp = 0.0;
-	// double mw = 0.0;
-	// double mw2 = 0.0;
-	// double imw = 0.0;
-	// double imw2 = 0.0;
-	// for(uint32_t s = 0; s < numSamples; s++)
-	// {
-	// 	for(uint32_t i=0; i < basicGaussianValues.rows(); i++)
-	// 	{
-	// 		basicGaussianValues(i) = gaussianSampler(gen);
-	// 	}
-
-	// 	const double rstd = 1.0;
-	// 	const double rinvcov = 1.0 / (rstd * rstd);
-	// 	Eigen::VectorXd newW = vecW.value() + rstd * L * basicGaussianValues;
-	// 	double g = 1.54203e201 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
-	// 	// double g = 5.78e202 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
-	// 	mg += g / static_cast<double>(numSamples);
-	// 	double p = 1.54203e207 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
-	// 	// double p = 10474275180.2 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
-	// 	mp += p / static_cast<double>(numSamples);
-	// 	double weight = p / g;
-	// 	mw += weight / static_cast<double>(numSamples);
-	// 	mw2 += weight * weight / static_cast<double>(numSamples);
-	// 	double iweight = g / p;
-	// 	imw += iweight / static_cast<double>(numSamples);
-	// 	imw2 += iweight * iweight / static_cast<double>(numSamples);
-	// 	if(glm::isnan(weight)) continue;
-	// 	auto diff = (newW - vecW.value());
-	// 	for(uint32_t i=0; i < newW.rows(); i++)
-	// 	{
-	// 		vSumW(i) += weight * diff(i) * diff(i);
-	// 	}
-	// 	sumWeights += weight;
-	// 	if(std::any_of(sumW.begin(), sumW.end(), [] (double v) { return glm::isnan(v); }))
-	// 	{
-	// 		std::cout << "nan " << std::endl;
-	// 	}
-	// 	// std::cout << s  << " " << weight << ", "; 
-
-	// 	if(s % 100 == 0)
-	// 	{
-	// 		double d = 0.0;
-	// 		for(uint32_t i=0; i < newW.rows(); i++)
-	// 		{
-	// 			const double v = (vSumW(i) / sumWeights - covMat.value()(i, i));
-	// 			d += v * v;
-	// 		}
-	// 		differences.push_back(d);
-
-	// 		double as = 0.0;
-	// 		for(uint32_t i=0; i < newW.rows(); i++)
-	// 		{
-	// 			const double v = (vSumW(i) - covMat.value()(i, i));
-	// 			as += glm::abs(v) / static_cast<double>(newW.rows());
-	// 		}
-
-	// 		if(s % 10000 == 0 || d > 1e10)
-	// 		{
-	// 			std::cout << s  << ": " << as << " // " << sumWeights  << " // " << d << std::endl;
-	// 		}
-	// 	}
-	// }
-
-	// std::cout << std::endl;
-
-	// std::cout << mg << " // " << mp << std::endl;
-	// std::cout << mw << " // " << glm::sqrt(mw2 - mw * mw)  << std::endl;
-	// std::cout << imw << " // " << glm::sqrt(imw2 - imw * imw)  << std::endl;
-
-	// std::cout << "End sampling" << std::endl;
-
-	// vSumW = vSumW / sumWeights;
-
-	// std::vector<float> fSumW(sumW.size());
-	// for(uint32_t i=0; i < fSumW.size(); i++)
-	// {
-	// 	fSumW[i] = sumW[i];
-	// }
-
-	// covScalarField = LinearNodeTree<2>(std::move(covScalarField->getNodeTree()), std::move(fSumW));
-
-	// write_array_to_file(differences, "diff2.bin");
-
-	// NodeTree<2>::Config quadConfig2 = {
-	// 	.minCoord = NodeTree<2>::vec(0.0f),
-	// 	.maxCoord = NodeTree<2>::vec(1.0f),
-	// 	.pointFilterMaxDistance = 0.0f / static_cast<float>(1 << maxDepth),
-	// 	//.pointFilterMaxDistance = 0.0f,
-	// 	.constraintNeighbourNodes = true,
-	// 	.maxDepth = maxDepth
-	// };
-
-	// NodeTree<2> quad;
-	// quad.compute(cloud, quadConfig2);
-
-	// std::unique_ptr<CubicNodeTree<2>> scalarField = std::make_unique<CubicNodeTree<2>>(std::move(quad), *scalarField1);
-
-	// config.nodeTreeConfig = quadConfig2;
-	// SmoothSurfaceReconstruction::computeCubicNodeLoss<2>(*scalarField, cloud, config);
-
-	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
-	// 	SmoothSurfaceReconstruction::computeLinearNodeTree<2, EigenSquareSolver>(cloud, config);
-	
-	
-	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
-	// 	GPReconstruction::computeLinearNodeTree<2>(std::move(quad), cloud, covScalarField);
-
-
-	// Eigen::JacobiSVD<Eigen::MatrixXd> svd(covMat.value(), Eigen::ComputeThinU | Eigen::ComputeThinV);
-	// Eigen::VectorXd sv = svd.singularValues();
-	// uint32_t numZeros = 0;
-	// for(uint32_t i=0; i < sv.size(); i++)
-	// {
-	// 	if(sv(i) > 1e-9)
-	// 	{
-	// 		sv(i) = 1.0f / sv(i);
-	// 	}
-	// 	else
-	// 	{
-	// 		numZeros++;
-	// 		sv(i) = 0.0f;
-	// 	}
-	// }
-	// std::cout << "num zeros " << numZeros << std::endl;
-	// Eigen::MatrixXd invCovMat = svd.matrixV() * sv.asDiagonal() * svd.matrixU().adjoint();
-
-	std::cout << "End compute" << std::endl;
-
-	// Eigen::LLT<Eigen::MatrixXd> covLLT(covMat.value());
-	// Eigen::MatrixXd L = covLLT.matrixL();
-	// std::cout << "End compute Cholensky" << std::endl;
-
-	// Eigen::VectorXd basicGaussianValues(vecW.value().rows());
-
-	// std::random_device rd{};
-    // std::mt19937 gen{rd()};
-
-	// std::normal_distribution gaussianSampler;
-
-	// std::vector<double> sumW(vecW.value().rows(), 0.0);
-	// auto vSumW = Eigen::Map<Eigen::VectorXd>(sumW.data(), sumW.size());
-
-	// std::cout << "Start sampling" << std::endl;
-	// // const uint32_t numSamples = 2048000;
-	// const uint32_t numSamples = 20480;
-	// double sumWeights = 0.0;
-	// std::vector<double> differences;
-	// double mg = 0.0;
-	// double mp = 0.0;
-	// double mw = 0.0;
-	// double mw2 = 0.0;
-	// double imw = 0.0;
-	// double imw2 = 0.0;
-	// for(uint32_t s = 0; s < numSamples; s++)
-	// {
-	// 	for(uint32_t i=0; i < basicGaussianValues.rows(); i++)
-	// 	{
-	// 		basicGaussianValues(i) = gaussianSampler(gen);
-	// 	}
-
-	// 	const double rstd = 1.0;
-	// 	const double rinvcov = 1.0 / (rstd * rstd);
-	// 	Eigen::VectorXd newW = vecW.value() + rstd * L * basicGaussianValues;
-	// 	double g = 1.54203e201 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
-	// 	// double g = 5.78e202 * glm::exp(-0.5 * (newW - vecW.value()).transpose() * rinvcov * invCovMat.value() * (newW - vecW.value()));
-	// 	mg += g / static_cast<double>(numSamples);
-	// 	double p = 1.54203e207 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
-	// 	// double p = 10474275180.2 * SmoothSurfaceReconstruction::evaulatePosteriorFunc(cloud, config, matP.value(), matN.value(), matS.value(), newW);
-	// 	mp += p / static_cast<double>(numSamples);
-	// 	double weight = p / g;
-	// 	mw += weight / static_cast<double>(numSamples);
-	// 	mw2 += weight * weight / static_cast<double>(numSamples);
-	// 	double iweight = g / p;
-	// 	imw += iweight / static_cast<double>(numSamples);
-	// 	imw2 += iweight * iweight / static_cast<double>(numSamples);
-	// 	if(glm::isnan(weight)) continue;
-	// 	auto diff = (newW - vecW.value());
-	// 	for(uint32_t i=0; i < newW.rows(); i++)
-	// 	{
-	// 		vSumW(i) += weight * diff(i) * diff(i);
-	// 	}
-	// 	sumWeights += weight;
-	// 	if(std::any_of(sumW.begin(), sumW.end(), [] (double v) { return glm::isnan(v); }))
-	// 	{
-	// 		std::cout << "nan " << std::endl;
-	// 	}
-	// 	// std::cout << s  << " " << weight << ", "; 
-
-	// 	if(s % 100 == 0)
-	// 	{
-	// 		double d = 0.0;
-	// 		for(uint32_t i=0; i < newW.rows(); i++)
-	// 		{
-	// 			const double v = (vSumW(i) / sumWeights - covMat.value()(i, i));
-	// 			d += v * v;
-	// 		}
-	// 		differences.push_back(d);
-
-	// 		double as = 0.0;
-	// 		for(uint32_t i=0; i < newW.rows(); i++)
-	// 		{
-	// 			const double v = (vSumW(i) - covMat.value()(i, i));
-	// 			as += glm::abs(v) / static_cast<double>(newW.rows());
-	// 		}
-
-	// 		if(s % 10000 == 0 || d > 1e10)
-	// 		{
-	// 			std::cout << s  << ": " << as << " // " << sumWeights  << " // " << d << std::endl;
-	// 		}
-	// 	}
-	// }
-
-	// std::cout << std::endl;
-
-	// std::cout << mg << " // " << mp << std::endl;
-	// std::cout << mw << " // " << glm::sqrt(mw2 - mw * mw)  << std::endl;
-	// std::cout << imw << " // " << glm::sqrt(imw2 - imw * imw)  << std::endl;
-
-	// std::cout << "End sampling" << std::endl;
-
-	// vSumW = vSumW / sumWeights;
-
-	// std::vector<float> fSumW(sumW.size());
-	// for(uint32_t i=0; i < fSumW.size(); i++)
-	// {
-	// 	fSumW[i] = sumW[i];
-	// }
-
-	// covScalarField = LinearNodeTree<2>(std::move(covScalarField->getNodeTree()), std::move(fSumW));
-
-	// write_array_to_file(differences, "diff2.bin");
-
-	// NodeTree<2>::Config quadConfig2 = {
-	// 	.minCoord = NodeTree<2>::vec(0.0f),
-	// 	.maxCoord = NodeTree<2>::vec(1.0f),
-	// 	.pointFilterMaxDistance = 0.0f / static_cast<float>(1 << maxDepth),
-	// 	//.pointFilterMaxDistance = 0.0f,
-	// 	.constraintNeighbourNodes = true,
-	// 	.maxDepth = maxDepth
-	// };
-
-	// NodeTree<2> quad;
-	// quad.compute(cloud, quadConfig2);
-
-	// std::unique_ptr<CubicNodeTree<2>> scalarField = std::make_unique<CubicNodeTree<2>>(std::move(quad), *scalarField1);
-
-	// config.nodeTreeConfig = quadConfig2;
-	// SmoothSurfaceReconstruction::computeCubicNodeLoss<2>(*scalarField, cloud, config);
-
-	// std::unique_ptr<LinearNodeTree<2>> scalarField = 
-	// 	SmoothSurfaceReconstruction::computeLinearNodeTree<2, EigenSquareSolver>(cloud, config);
 
 	// Export point cloud
 	cloud.writeToFile("./output/" + inConfig.outputName + "_input.txt");
@@ -864,23 +611,26 @@ int main(int argc, char *argv[])
 	drawScalarField(image, *scalarField, cloud, true);
 	image.savePNG("./output/" + inConfig.outputName + "_mu.png");
 
-	Image cimage;
-	cimage.init(2048, 2048);
-	drawCovField(cimage, *covScalarField, cloud);
-	cimage.savePNG("./output/" + inConfig.outputName + "_std.png");
-
+	if(inConfig.computeVariance)
 	{
-		Image colimage;
-		colimage.init(2048, 2048);
-		drawCollisionField(colimage, *scalarField, *covScalarField, false, cloud);
-		colimage.savePNG("./output/" + inConfig.outputName + "_pIn.png");
-	}
+		Image cimage;
+		cimage.init(2048, 2048);
+		drawCovField(cimage, *covScalarField, cloud);
+		cimage.savePNG("./output/" + inConfig.outputName + "_std.png");
 
-	{
-		Image colimage;
-		colimage.init(2048, 2048);
-		drawCollisionField(colimage, *scalarField, *covScalarField, true, cloud);
-		colimage.savePNG("./output/" + inConfig.outputName + "_pSur.png");
+		{
+			Image colimage;
+			colimage.init(2048, 2048);
+			drawCollisionField(colimage, *scalarField, *covScalarField, false, cloud);
+			colimage.savePNG("./output/" + inConfig.outputName + "_pIn.png");
+		}
+
+		{
+			Image colimage;
+			colimage.init(2048, 2048);
+			drawCollisionField(colimage, *scalarField, *covScalarField, true, cloud);
+			colimage.savePNG("./output/" + inConfig.outputName + "_pSur.png");
+		}
 	}
 
 	// Image imageG;

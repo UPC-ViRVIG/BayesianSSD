@@ -22,8 +22,8 @@ struct InputConfig
 	float bbMargin;
 	float octreeMaxDepth;
 	float octreeSubRuleInVoxels;
-	float gradiantVariance;
-	float smoothnessVariance;
+	float gradientStd;
+	float smoothnessStd;
 	bool computeVariance;
 	float normalsDistanceFactor;
 	float normalsPointsCorrelation;
@@ -31,7 +31,7 @@ struct InputConfig
 	float gradiantXYVariance;
 	float mulStd;
 
-	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradiantVariance, smoothnessVariance, computeVariance, normalsDistanceFactor, normalsPointsCorrelation, normalsNumNearPoints, gradiantXYVariance, mulStd);
+	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradientStd, smoothnessStd, computeVariance, normalsDistanceFactor, normalsPointsCorrelation, normalsNumNearPoints, gradiantXYVariance, mulStd);
 };
 
 char* loadFromFile(std::string path, size_t* length)
@@ -111,10 +111,10 @@ int main(int argc, char *argv[])
 
 	SmoothSurfaceReconstruction::Config<3> config = {
 		.posWeight = 1.0f, 
-        .gradientWeight = 1.0f/inConfig.gradiantVariance,
+        .gradientWeight = 1.0f/inConfig.gradientStd,
 		.gradientXYWeight = 1.0f/inConfig.gradiantXYVariance,
         // .smoothWeight = 1.0f/150.0f,
-		.smoothWeight = 1.0f/inConfig.smoothnessVariance,
+		.smoothWeight = 1.0f/inConfig.smoothnessStd,
 		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN,
 		.computeVariance = inConfig.computeVariance,
 		.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::BASE_RED

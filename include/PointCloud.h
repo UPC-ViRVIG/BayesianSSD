@@ -358,7 +358,6 @@ void PointCloud<Dim>::computeNormals(uint32_t numNear, double varByDistancePer, 
 			double sqDist = glm::dot(p, p) / meanSqDistance;
 			double pVar = (1.0 + varByDistancePer * (sqDist-1.0))  * (v1 + v2);
 			pVar += meanCurvature * meanCurvature * glm::dot(p, p);
-			// pVar = meanCurvature * meanCurvature * glm::dot(p, p);
 			if(useCovariances)
 			{
 				for(uint32_t d = 0; d < Dim; d++) P(j, d) = p[d];

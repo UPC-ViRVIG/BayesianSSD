@@ -21,8 +21,8 @@ struct InputConfig
 	float bbMargin;
 	float octreeMaxDepth;
 	float octreeSubRuleInVoxels;
-	float gradiantVariance;
-	float smoothnessVariance;
+	float gradientStd;
+	float smoothnessStd;
 	bool computeVariance;
 	float normalsDistanceFactor;
 	float normalsPointsCorrelation;
@@ -31,7 +31,7 @@ struct InputConfig
 	float mulStd;
 	uint32_t invRedMatRank;
 
-	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradiantVariance, smoothnessVariance, computeVariance, normalsDistanceFactor, normalsPointsCorrelation, normalsNumNearPoints, gradiantXYVariance, mulStd, invRedMatRank);
+	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradientStd, smoothnessStd, computeVariance, normalsDistanceFactor, normalsPointsCorrelation, normalsNumNearPoints, gradiantXYVariance, mulStd, invRedMatRank);
 };
 
 char* loadFromFile(std::string path, size_t* length)
@@ -204,10 +204,10 @@ int main(int argc, char *argv[])
 
 	SmoothSurfaceReconstruction::Config<3> config = {
 		.posWeight = 1.0f, 
-        .gradientWeight = 1.0f/inConfig.gradiantVariance,
+        .gradientWeight = 1.0f/inConfig.gradientStd,
 		.gradientXYWeight = 1.0f/inConfig.gradiantXYVariance,
         // .smoothWeight = 1.0f/150.0f,
-		.smoothWeight = 1.0f/inConfig.smoothnessVariance,
+		.smoothWeight = 1.0f/inConfig.smoothnessStd,
 		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN,
 		.computeVariance = inConfig.computeVariance,
 		.invAlgorithm = static_cast<SmoothSurfaceReconstruction::InverseAlgorithm>(mode),
@@ -229,9 +229,8 @@ int main(int argc, char *argv[])
 		coctree = octree;
 	}
 	std::optional<LinearNodeTree<3>> covScalarField;
-	std::vector<glm::vec3> unkownVertices;
 	std::unique_ptr<LinearNodeTree<3>> scalarField =
-		SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octree), cloud, config, covScalarField, unkownVertices);
+		SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octree), cloud, config, covScalarField);
 
 	if(computeSimpleVariance)
 	{
@@ -242,9 +241,8 @@ int main(int argc, char *argv[])
 		octreeS.compute(cloud, quadConfig);
 
 		std::optional<LinearNodeTree<3>> covScalarFieldS;
-		std::vector<glm::vec3> unkownVerticesS;
 		std::unique_ptr<LinearNodeTree<3>> scalarFieldS =
-			SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octreeS), cloud, config, covScalarFieldS, unkownVerticesS);
+			SmoothSurfaceReconstruction::computeLinearNodeTree<3>(std::move(octreeS), cloud, config, covScalarFieldS);
 
 		// std::vector<float> interVar;
 		// for(uint32_t i=0; i < unkownVertices.size(); i++)
