@@ -37,11 +37,11 @@ Example:
 {
     "pointCloudName": "MyHand",
     "outputName": "MyHand",
-    "bbMargin": 0.05,
+    "bbMargin": 0.1,
     "octreeMaxDepth": 8,
     "octreeSubRuleInVoxels": 1.66,
-    "gradientStd": 0.6,
-    "smoothnessStd": 0.008,
+    "gradientStd": 2.0,
+    "smoothnessStd": 0.004,
     "computeVariance": true,
     "inverseMethod": "octree_red",
     "baseRedRank": 1024,
@@ -119,6 +119,12 @@ The two binary files `{CurrentPath}/output/[outputName].bin` and `{CurrentPath}/
 ```
 
 It is important to execute both programs in the same directory; otherwise, the viewer will not find the output folder with the results.
+
+## Limitations
+
+As mentioned in the paper's conclusions, there is a relationship between the input parameters. If we are forcing a high smoothness of the field and the normals have a high variance, then the final field gradient might not have magnitude one near the points. Also, if the variance of the gradient is too low, this can produce instabilities in the system, which will result in more solver iterations and less accurate results. Both reconstruction executables print a `Mean gradient magnitude at the points: 0.96`, which can be used to diagnose these two cases. This value should be between [0.9, 0.98]. This value can be changed by playing with the configuration parameter `gradientStd` without affecting the resulting uncertainty critically. 
+
+TODO: An interesting addition to the algorithm could be selecting this value automatically.
 
 
 
