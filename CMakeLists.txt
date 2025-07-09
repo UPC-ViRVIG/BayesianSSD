@@ -80,8 +80,7 @@ endif()
 
 # MarchingCubes
 FetchContent_Declare(meshreconstruction_lib
-    GIT_REPOSITORY https://github.com/Magnus2/MeshReconstruction.git
-    GIT_TAG 423213b1222cbe97ad45434ab112500111a966ff
+    GIT_REPOSITORY https://github.com/triter3/MeshReconstruction.git
 )
 
 FetchContent_GetProperties(meshreconstruction_lib)
