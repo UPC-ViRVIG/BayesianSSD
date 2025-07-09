@@ -1,0 +1,18 @@
+{
+    "pointCloudName": "MyHand",
+    "outputName": "MyHand",
+    "bbMargin": 0.1,
+    "octreeMaxDepth": 8,
+    "octreeSubRuleInVoxels": 1.66,
+    "gradientStd": 2.0,
+    "smoothnessStd": 0.004,
+    "computeVariance": true,
+    "inverseMethod": "octree_red",
+    "baseRedRank": 1024,
+    "octreeRedDepth": 5,
+    "mulPointsStd": 1.0,
+    "computeNormals": true,
+    "normalsNumNearPoints": 20,
+    "normalsDistanceFactor": 0.5,
+    "defaultNormalsStd": 0.2
+}

@@ -1,0 +1,18 @@
+{
+    "pointCloudName": "initFig",
+	"outputName": "initFig",
+	"bbMargin": 0.2,
+	"octreeMaxDepth": 6,
+	"octreeSubRuleInVoxels": 3.3,
+	"gradientStd": 1.2,
+	"smoothnessStd": 0.01,
+	"computeVariance": true,
+	"inverseMethod": "octree_red",
+	"baseRedRank": 200,
+	"octreeRedDepth": 5,
+	"mulPointsStd": 1.0,
+	"computeNormals": true,
+	"normalsNumNearPoints": 3,
+	"normalsDistanceFactor": 5.0,
+	"defaultNormalsStd": 0.1
+}
