@@ -33,13 +33,38 @@ Both targets use the same configuration files. The config file is a JSON that co
 - `defaultNormalsStd`: Default normals variance value when Bayesian PCA is not used.
 
 Example:
-
+```
+{
+    "pointCloudName": "MyHand",
+    "outputName": "MyHand",
+    "bbMargin": 0.05,
+    "octreeMaxDepth": 8,
+    "octreeSubRuleInVoxels": 1.66,
+    "gradientStd": 0.6,
+    "smoothnessStd": 0.008,
+    "computeVariance": true,
+    "inverseMethod": "octree_red",
+    "baseRedRank": 1024,
+    "octreeRedDepth": 5,
+    "mulPointsStd": 1.0,
+    "computeNormals": true,
+    "normalsNumNearPoints": 20,
+    "normalsDistanceFactor": 0.5,
+    "defaultNormalsStd": 0.2
+}
+```
 
 Next, we have a description of the inputs and outputs of each one.
 
 ### 2D Reconstruction
 
 The target `recon_2d` makes a 2D reconstruction. The inputs are a point cloud specified in text format and the configuration file. The outputs are PNG images of the reconstruction showing different properties.
+
+The executable expects the path of the JSON config file as an input argument:
+
+```
+{PathToExecutable}/recon_2d.exe ./path/to/config.json
+```
 
 ##### Point cloud description
 
@@ -60,26 +85,40 @@ These files should be placed inside the **data** folder.
 
 ##### Outputs
 
-In the 2D case the outputs of the method are four PNG images when the variance computation is enables, which are:
+In the 2D case, the outputs of the method are four PNG images when the variance computation is enabled, which are:
 
-- `[outputName]_mu.png`: Image showing the final field, which correspond to the mean values.
-- `[outputName]_pIn.png`: Image showing the probability of beign inside or outside using the virdis palette.
-- `[outputName]_pSur.png`: Image showing the confidence of of the surface beign there using the magma palette.
-- `[outputName]_std.png`: The output variances using the virdis palette.
+- `{CurrentPath}/output/[outputName]_mu.png`: Image showing the final field corresponding to the mean values.
+- `{CurrentPath}/output/[outputName]_pIn.png`: Image showing the probability of being inside or outside using the viridis palette.
+- `{CurrentPath}/output/[outputName]_pSur.png`: Image showing the confidence of the surface being there using the magma palette.
+- `{CurrentPath}/output/[outputName]_std.png`: The output variances using the viridis palette.
 
 ### 3D Reconstruction
 
 The target `recon_3d` makes a 3D reconstruction. The inputs are a point cloud specified as a PLY with some custom properties and the configuration file. The outputs are a PLY of the final mesh and two binary files that store the reconstructed field in a custom format. These binary files can be used in the 3D viewer (explained below) to observe different properties.
 
-##### Point cloud description
+The executable expects the path of the JSON config file as an input argument:
 
-##### Reconstruction config
+```
+{PathToExecutable}/recon_3d.exe ./path/to/config.json
+```
+
+##### Point cloud description
+In the 3D version, the input point clouds are expected in PLY files. Each point, represented as a vertex in the PLY, must contain seven properties:
+
+- `x`, `y`, `z`: The position of the point.
+- `nx`, `ny`, `nz`: The normal of the point. If the normals are computed using PLY, this field is still necessary to compute the orientation of the final solution.
+- `noise_std`: The points' position standard deviation. The variance is only a scalar value because we only work with isotropic Gaussians for the positions.
 
 ##### Outputs
+The outputs of the model are a mesh and two binaries. The mesh is a PLY file with path `{CurrentPath}/output/[outputName].ply`. The vertices of the mesh have a special property called `noise_std`, which represents the standard deviation of the solution at that point. 
 
-### 3D Viewer
+The two binary files `{CurrentPath}/output/[outputName].bin` and `{CurrentPath}/output/[outputName]_var.bin` contain the values of the final octree reconstruction. These two results can be visualized using the target `Viewer`. The viewer expects the output name specified in the configuration file:
 
+```
+{PathToExecutable}/Viewer.exe [outputName]
+```
 
+It is important to execute both programs in the same directory; otherwise, the viewer will not find the output folder with the results.
 
 
 

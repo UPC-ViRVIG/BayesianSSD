@@ -12,8 +12,6 @@
 
 #include <cereal/archives/portable_binary.hpp>
 
-
-
 struct InputConfig
 {
 	std::string pointCloudName;
@@ -24,14 +22,18 @@ struct InputConfig
 	float gradientStd;
 	float smoothnessStd;
 	bool computeVariance;
-	float normalsDistanceFactor;
-	float normalsPointsCorrelation;
+	std::string inverseMethod;
+	uint32_t baseRedRank;
+	uint32_t octreeRedDepth;
+	float mulPointsStd;
+	bool computeNormals;
 	uint32_t normalsNumNearPoints;
-	float gradiantXYVariance;
-	float mulStd;
-	uint32_t invRedMatRank;
+	float normalsDistanceFactor;
+	float defaultNormalsStd;
 
-	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradientStd, smoothnessStd, computeVariance, normalsDistanceFactor, normalsPointsCorrelation, normalsNumNearPoints, gradiantXYVariance, mulStd, invRedMatRank);
+	JS_OBJ(pointCloudName, outputName, bbMargin, octreeMaxDepth, octreeSubRuleInVoxels, gradientStd, smoothnessStd, computeVariance, 
+		   inverseMethod, baseRedRank, octreeRedDepth, mulPointsStd, 
+		   computeNormals, normalsNumNearPoints, normalsDistanceFactor, defaultNormalsStd);
 };
 
 char* loadFromFile(std::string path, size_t* length)
@@ -65,12 +67,6 @@ int main(int argc, char *argv[])
 		std::cout << "Wrong arguments!" << std::endl << std::endl;
 		std::cout << "\t" << argv[0] << " <Input cloud> <Output image> [resolution]" << std::endl;
 		return -1;
-	}
-
-	uint32_t mode = 1;
-	if(argc > 2)
-	{
-		mode = std::stoi(std::string(argv[2]));
 	}
 
 	
@@ -148,15 +144,23 @@ int main(int argc, char *argv[])
 
 	Timer timer;
 	timer.start();
-	cloud.computeNormals(inConfig.normalsNumNearPoints, 0.0, inConfig.normalsPointsCorrelation, inConfig.normalsDistanceFactor / bbRadius);
-	// cloud.computeNormals(inConfig.normalsNumNearPoints, inConfig.normalsDistanceFactor, inConfig.normalsPointsCorrelation, 0.0f);
-	// cloud.fillNormalsData(0.0001);
-	// std::cout << "Time computing normals: " << timer.getElapsedSeconds() << std::endl;
 
 	for(uint32_t i=0; i < cloud.size(); i++)
 	{
-		cloud.getVariances()[i] *= inConfig.mulStd * inConfig.mulStd;
+		cloud.getVariances()[i] *= inConfig.mulPointsStd * inConfig.mulPointsStd;
 	}
+
+	if(inConfig.computeNormals)
+	{
+		cloud.computeNormals(inConfig.normalsNumNearPoints, 0.0, 0.0, inConfig.normalsDistanceFactor / bbRadius);
+	}
+	else
+	{
+		cloud.fillNormalsData(inConfig.defaultNormalsStd);
+	}
+	// cloud.computeNormals(inConfig.normalsNumNearPoints, inConfig.normalsDistanceFactor, inConfig.normalsPointsCorrelation, 0.0f);
+	// cloud.fillNormalsData(0.0001);
+	// std::cout << "Time computing normals: " << timer.getElapsedSeconds() << std::endl;
 
 	// Export point cloud
 	cloud.writeToFile("./output/" + inConfig.outputName + "_input.ply");
@@ -202,16 +206,20 @@ int main(int argc, char *argv[])
 		.maxDepth = maxDepth
 	};
 
+	SmoothSurfaceReconstruction::InverseAlgorithm invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL;
+	if(inConfig.inverseMethod == "base_red") invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::BASE_RED;
+	const bool computeSimpleVariance = inConfig.computeVariance && inConfig.inverseMethod == "octree_red";
+
 	SmoothSurfaceReconstruction::Config<3> config = {
 		.posWeight = 1.0f, 
         .gradientWeight = 1.0f/inConfig.gradientStd,
-		.gradientXYWeight = 1.0f/inConfig.gradiantXYVariance,
+		.gradientXYWeight = 1.0f,
         // .smoothWeight = 1.0f/150.0f,
 		.smoothWeight = 1.0f/inConfig.smoothnessStd,
 		.algorithm = SmoothSurfaceReconstruction::Algorithm::BAYESIAN,
 		.computeVariance = inConfig.computeVariance,
-		.invAlgorithm = static_cast<SmoothSurfaceReconstruction::InverseAlgorithm>(mode),
-		.invRedMatRank = inConfig.invRedMatRank
+		.invAlgorithm = invAlgorithm,
+		.invRedMatRank = inConfig.baseRedRank
 	};
 
 	timer.start();
@@ -222,7 +230,6 @@ int main(int argc, char *argv[])
 	std::cout << "Octree creation " << timer.getElapsedSeconds() << std::endl;
 
 	NodeTree<3> coctree;
-	bool computeSimpleVariance = mode == 5 && config.computeVariance;
 	if(computeSimpleVariance) 
 	{
 		config.computeVariance = false;
@@ -235,7 +242,7 @@ int main(int argc, char *argv[])
 	if(computeSimpleVariance)
 	{
 		config.computeVariance = true;
-		quadConfig.maxDepth -= 3;
+		quadConfig.maxDepth = inConfig.octreeRedDepth;
 		config.invAlgorithm = SmoothSurfaceReconstruction::InverseAlgorithm::FULL;
 		NodeTree<3> octreeS;
 		octreeS.compute(cloud, quadConfig);
@@ -315,8 +322,8 @@ int main(int argc, char *argv[])
 	const glm::vec3 bbSize = scalarField->getMaxCoord() - scalarField->getMinCoord();
 	MeshReconstruction::Rect3 mcDomain { toVec3(scalarField->getMinCoord()), 
 										 toVec3(bbSize)};
-	// MeshReconstruction::Vec3 cubeSize = toVec3(glm::vec3(bbSize / static_cast<float>(1 << (maxDepth+1))));
-	MeshReconstruction::Vec3 cubeSize = toVec3(glm::vec3(bbSize / static_cast<float>(1 << maxDepth-1)));
+	MeshReconstruction::Vec3 cubeSize = toVec3(glm::vec3(bbSize / static_cast<float>(1 << (maxDepth))));
+	// MeshReconstruction::Vec3 cubeSize = toVec3(glm::vec3(bbSize / static_cast<float>(1 << maxDepth-1)));
 	MeshReconstruction::Mesh mesh = MeshReconstruction::MarchCube(fSdf, mcDomain, cubeSize, 0.0, gSdf);
 
 	std::cout << "Num vertices " << mesh.vertices.size() << std::endl;
@@ -355,7 +362,7 @@ int main(int argc, char *argv[])
 		archive(*covScalarField);
 	}
 
-	std::cout << "output" << std::endl;
+	std::cout << "End" << std::endl;
 
 	return 0;
 }
